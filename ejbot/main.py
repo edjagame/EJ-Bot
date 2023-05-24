@@ -1,26 +1,20 @@
-# This example requires the 'message_content' intent.
-
-import discord
 import os
+import discord
 from dotenv import load_dotenv
+from discord.ext import bridge
 
-
-intents = discord.Intents.default()
+intents = discord.Intents()
 intents.message_content = True
+bot = bridge.Bot(command_prefix=">", intents=intents)
+cogs_list = [
+    'Fun',
+]
+for cog in cogs_list:
+    bot.load_extension(f'cogs.{cog}')
 
-client = discord.Client(intents=intents)
-
-@client.event
+@bot.event
 async def on_ready():
-    print(f'We have logged in as {client.user}')
-
-@client.event
-async def on_message(message):
-    if message.author == client.user:
-        return
-
-    if message.content.startswith('$hello'):
-        await message.channel.send('Hello!')
+    print(f"{bot.user} is ready and online!")
 
 load_dotenv()
-client.run(os.getenv('TOKEN'))
+bot.run(os.getenv('TOKEN'))

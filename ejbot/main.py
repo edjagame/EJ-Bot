@@ -8,6 +8,8 @@ intents.message_content = True
 bot = bridge.Bot(command_prefix=">", intents=intents)
 cogs_list = [
     'Fun',
+    'Music',
+    'Genshin'
 ]
 for cog in cogs_list:
     bot.load_extension(f'cogs.{cog}')

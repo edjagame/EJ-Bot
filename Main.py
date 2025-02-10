@@ -8,7 +8,6 @@ from discord.ext import commands
 from dotenv import load_dotenv
 load_dotenv()
 
-# Intents
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -28,4 +27,5 @@ async def on_ready():
     print('Bot is ready!')
 
 # Run bot
-bot.run(os.getenv('DISCORD_TOKEN'))
+if __name__ == '__main__':
+    bot.run(os.getenv('DISCORD_TOKEN'))

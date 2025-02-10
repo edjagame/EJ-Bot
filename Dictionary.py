@@ -28,7 +28,6 @@ class Dictionary(commands.Cog):
                     if definition:
                         display += f"{i}. {definition}\n"
 
-
             embed=discord.Embed(
                 colour=discord.Color.green(),
                 title=f"{word.capitalize()}",
@@ -37,6 +36,11 @@ class Dictionary(commands.Cog):
             await ctx.reply(embed=embed)
         except:
             await ctx.reply(f'Could not find the definition for {word.lower()}')
+    
+    # Gets the synonyms of a word
+    @commands.command()
+    async def synonym(self, ctx, word):
+        pass
 
 
 

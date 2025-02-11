@@ -16,6 +16,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 async def load_extensions():
     extensions = ['Admin', 'Dictionary', 'Ejai', 'Music']
+    extensions = ['Ejai']
     for extension in extensions:
         await bot.load_extension(extension)
         print(f'Loaded {extension}')

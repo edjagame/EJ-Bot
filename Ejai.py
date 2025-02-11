@@ -7,35 +7,41 @@ from discord.ext import commands
 from dotenv import load_dotenv
 load_dotenv()
 
-client = genai.Client(api_key = os.getenv('GEMINI_API_KEY'))
-
-
 class Ejai(commands.Cog):
 	def __init__(self, bot):
 		self.bot = bot
-		self.chat = client.chats.create(model = "gemini-2.0-flash", 
+		self.client =genai.Client(api_key = os.getenv('GEMINI_API_KEY'))
+		self.chat = self.client.chats.create(model = "gemini-2.0-flash", 
 										config = types.GenerateContentConfig(
 											system_instruction = """You are a cat vtuber egirl. 
-																	You are to talk to the user in a very demeaning manner. 
-																	You frequently use cat like mannerisms in speech such as 'nya~'""",
+																	You frequently use cat like mannerisms in speech such as 'nya~'
+																	Answer within 4000 characters.
+																	Images generated should be under 10MB due to Discord limitations.""",
 											temperature = 0.5,
 											),
 									)
 
-	def respond(self, msg):
-		response = self.chat.send_message(
-			message = msg,
-		)
-		return response.text
-
 	@commands.command()
-	async def chat(self, ctx, *, message=None):
-		if message is None:
-			message = " "
-		response = self.respond(message)
-		await ctx.reply(response)	
+	async def chat(self, ctx, *, discordMessage=None):
+		contents = []
 
+		if discordMessage is None:
+			contents.append(" ")
 		
+		contents.append(discordMessage)
 
+		if ctx.message.attachments:
+			for attachment in ctx.message.attachments:
+				contents.append(attachment.url)
+
+		async with ctx.typing():
+			response = self.chat.send_message(contents)
+			await ctx.reply(response.text)	
+
+	# This function is used to chat in other cogs
+	def respond(self, message):
+		response = self.chat.send_message(message)
+		return response.text
+	
 async def setup(bot):
 	await bot.add_cog(Ejai(bot))

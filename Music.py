@@ -1,133 +1,72 @@
-'''
-This code was taken from https://github.com/Rapptz/discord.py/blob/v2.4.0/examples/basic_voice.py
-'''
-
-# This example requires the 'message_content' privileged intent to function.
-
-import asyncio
-
-import discord
-import youtube_dl
-
+import wavelink
 from discord.ext import commands
-
-# Suppress noise about console usage from errors
-youtube_dl.utils.bug_reports_message = lambda: ''
-
-
-ytdl_format_options = {
-    'format': 'bestaudio/best',
-    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-    'restrictfilenames': True,
-    'noplaylist': True,
-    'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': False,
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'auto',
-    'source_address': '0.0.0.0',  # bind to ipv4 since ipv6 addresses cause issues sometimes
-}
-
-ffmpeg_options = {
-    'options': '-vn',
-}
-
-ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
-
-
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
-
-        self.data = data
-
-        self.title = data.get('title')
-        self.url = data.get('url')
-
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-
-        if 'entries' in data:
-            # take first item from a playlist
-            data = data['entries'][0]
-
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
-
 
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._last_member = None
+        self.node = None  # Store the node here
+        self.bot.loop.create_task(self.connect_to_node())  # Call connect_to_node
+
+    async def connect_to_node(self):  # Separate connection function
+        if self.node is None: # Check if a node is already connected
+            try:
+                self.node = wavelink.Node(uri="http://127.0.0.1:2333", password="youshallnotpass12345678")
+                await wavelink.Pool.connect(client=self.bot, nodes=[self.node])
+                print("Successfully connected to Lavalink node.") 
+                wavelink.Player.autoplay = True
+            except Exception as e:
+                print(f"Error connecting to Lavalink node: {e}")  
+    
 
     @commands.command()
-    async def join(self, ctx, *, channel: discord.VoiceChannel):
-        """Joins a voice channel"""
+    async def play(self, ctx, *, search: str):
+        query = await wavelink.Playable.search(search)
+        query = query[0]
+        
+        if not ctx.voice_client:
+            vc: wavelink.Player = await ctx.author.voice.channel.connect(cls=wavelink.Player)
+        else:
+            vc: wavelink.Player = ctx.voice_client
 
-        if ctx.voice_client is not None:
-            return await ctx.voice_client.move_to(channel)
-
-        await channel.connect()
-
-    @commands.command()
-    async def play(self, ctx, *, query):
-        """Plays a file from the local filesystem"""
-
-        source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(query))
-        ctx.voice_client.play(source, after=lambda e: print(f'Player error: {e}') if e else None)
-
-        await ctx.send(f'Now playing: {query}')
-
-    @commands.command()
-    async def yt(self, ctx, *, url):
-        """Plays from a url (almost anything youtube_dl supports)"""
-
-        async with ctx.typing():
-            player = await YTDLSource.from_url(url, loop=self.bot.loop)
-            ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-
-        await ctx.send(f'Now playing: {player.title}')
+        if vc.queue.is_empty:
+            await vc.play(query)
+            await ctx.send(f'Now playing: {query.title}')
+        else:
+            await vc.queue.put_wait(query)
+            await ctx.send(f'Added to queue: {query.title}')
 
     @commands.command()
-    async def stream(self, ctx, *, url):
-        """Streams from a url (same as yt, but doesn't predownload)"""
-
-        async with ctx.typing():
-            player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-            ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-
-        await ctx.send(f'Now playing: {player.title}')
+    async def skip(self, ctx):
+        vc: wavelink.Player = ctx.voice_client
+        await vc.stop()
+        await ctx.send('Skipped!')
 
     @commands.command()
-    async def volume(self, ctx, volume: int):
-        """Changes the player's volume"""
-
-        if ctx.voice_client is None:
-            return await ctx.send("Not connected to a voice channel.")
-
-        ctx.voice_client.source.volume = volume / 100
-        await ctx.send(f"Changed volume to {volume}%")
+    async def pause(self, ctx):
+        vc: wavelink.Player = ctx.voice_client
+        await vc.set_pause(True)
+        await ctx.send('Paused!')
+    
+    @commands.command()
+    async def resume(self, ctx):
+        vc: wavelink.Player = ctx.voice_client
+        await vc.set_pause(False)
+        await ctx.send('Resumed!')
 
     @commands.command()
-    async def stop(self, ctx):
-        """Stops and disconnects the bot from voice"""
-
-        await ctx.voice_client.disconnect()
-
-    @play.before_invoke
-    @yt.before_invoke
-    @stream.before_invoke
-    async def ensure_voice(self, ctx):
-        if ctx.voice_client is None:
-            if ctx.author.voice:
-                await ctx.author.voice.channel.connect()
-            else:
-                await ctx.send("You are not connected to a voice channel.")
-                raise commands.CommandError("Author not connected to a voice channel.")
-        elif ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
-
-async def setup(bot):
+    async def disconnect(self, ctx):
+        vc: wavelink.Player = ctx.voice_client
+        await vc.disconnect()
+        await ctx.send('Disconnected!')
+    
+    async def queue(self, ctx):
+        vc: wavelink.Player = ctx.voice_client
+        if vc.queue.is_empty:
+            await ctx.send('Queue is empty!')
+        else:
+            queue = vc.queue
+            await ctx.send(f'Queue: {queue}')
+        
+async def setup(bot):  
     await bot.add_cog(Music(bot))

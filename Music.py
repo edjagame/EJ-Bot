@@ -19,8 +19,9 @@ class Music(commands.Cog):
                 print(f"Error connecting to Lavalink node: {e}")  
     
 
-    @commands.command()
+    @commands.command(name="play", help="Play music in the voice channel. Usage: !play <song name> or !play <URL>")
     async def play(self, ctx, *, search: str):
+        """Play music in the voice channel. Usage: !play <song name>"""
         query = await wavelink.Playable.search(search)
         query = query[0]
         
@@ -36,30 +37,31 @@ class Music(commands.Cog):
             await vc.queue.put_wait(query)
             await ctx.send(f'Added to queue: {query.title}')
 
-    @commands.command()
+    @commands.command(name="skip", help="Skip the current song. Usage: !skip")
     async def skip(self, ctx):
         vc: wavelink.Player = ctx.voice_client
         await vc.stop()
         await ctx.send('Skipped!')
 
-    @commands.command()
+    @commands.command(name="pause", help="Pause the current song. Usage: !pause")
     async def pause(self, ctx):
         vc: wavelink.Player = ctx.voice_client
         await vc.set_pause(True)
         await ctx.send('Paused!')
     
-    @commands.command()
+    @commands.command(name="resume", help="Resume the current song. Usage: !resume")
     async def resume(self, ctx):
         vc: wavelink.Player = ctx.voice_client
         await vc.set_pause(False)
         await ctx.send('Resumed!')
 
-    @commands.command()
+    @commands.command(name="disconnect", help="Disconnect the bot from the voice channel. Usage: !disconnect")
     async def disconnect(self, ctx):
         vc: wavelink.Player = ctx.voice_client
         await vc.disconnect()
         await ctx.send('Disconnected!')
     
+    @commands.command(name="queue", help="Display the current queue. Usage: !queue")
     async def queue(self, ctx):
         vc: wavelink.Player = ctx.voice_client
         if vc.queue.is_empty:

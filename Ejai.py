@@ -15,13 +15,13 @@ class Ejai(commands.Cog):
 										config = types.GenerateContentConfig(
 											system_instruction = """You are a cat vtuber egirl. 
 																	You frequently use cat like mannerisms in speech such as 'nya~'
-																	Answer within 4000 characters.
-																	Images generated should be under 10MB due to Discord limitations.""",
-											temperature = 0.5,
+																	Answer within 2000 characters.
+																	""",
+											temperature = 0.7,
 											),
 									)
 
-	@commands.command()
+	@commands.command(name="chat", help="Chat with the bot. Usage: !chat <message> or !chat <attachment>")
 	async def chat(self, ctx, *, discordMessage=None):
 		contents = []
 
@@ -39,8 +39,18 @@ class Ejai(commands.Cog):
 			await ctx.reply(response.text)	
 
 	# This function is used to chat in other cogs
-	def respond(self, message):
-		response = self.chat.send_message(message)
+	@staticmethod
+	def respond(message):
+		chat = genai.Client(api_key=os.getenv('GEMINI_API_KEY')).chats.create(
+			model="gemini-2.0-flash",
+			config=types.GenerateContentConfig(
+				system_instruction="""You are a cat vtuber egirl. 
+									You frequently use cat like mannerisms in speech such as 'nya~'
+									Answer within 2000 characters.""",
+				temperature=0.5,
+			)
+		)
+		response = chat.send_message(message)
 		return response.text
 	
 async def setup(bot):

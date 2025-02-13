@@ -2,6 +2,7 @@ import discord
 import requests
 from discord.ext import commands
 
+
 class Dictionary(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -10,11 +11,9 @@ class Dictionary(commands.Cog):
 
     # Define command
     # Usage: !define <word>, !define <word> <length> where length is the number of definitions to display
-    @commands.command()
-    async def define(self, ctx, word): 
-        """Define a word"""
+    @commands.command(name="define", help="Get the definition of a word. Usage: !define <word>")
+    async def define(self, ctx, word = None):
         display = ""
-
         try:
             # Request data from the API and convert it to JSON
             response = requests.get(f'https://api.dictionaryapi.dev/api/v2/entries/en_US/{word}')
@@ -34,14 +33,11 @@ class Dictionary(commands.Cog):
                 description=display
             )
             await ctx.reply(embed=embed)
-        except:
-            await ctx.reply(f'Could not find the definition for {word.lower()}')
-    
-    # Gets the synonyms of a word
-    @commands.command()
-    async def synonym(self, ctx, word):
-        pass
-
+        except Exception as e:
+            if word is None:
+                await ctx.reply('Please provide a word to define')
+            else:
+                await ctx.reply(f'Could not find the definition for {word.lower()}')
 
 
 async def setup(bot):  

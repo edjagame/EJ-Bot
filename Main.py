@@ -16,7 +16,6 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 async def load_extensions():
     extensions = ['Admin', 'Dictionary', 'Ejai', 'Music']
-    extensions = ['Ejai']
     for extension in extensions:
         await bot.load_extension(extension)
         print(f'Loaded {extension}')
@@ -26,6 +25,7 @@ async def on_ready():
     print(f'Logged in as {bot.user.name} ({bot.user.id})')
     await load_extensions()
     print('Bot is ready!')
+
 
 # Run bot
 if __name__ == '__main__':

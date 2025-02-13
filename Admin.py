@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 
+import Ejai
+
 class Greetings(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -12,15 +14,12 @@ class Greetings(commands.Cog):
         if channel is not None:
             await channel.send(f'Welcome {member.mention}!')
 
-    @commands.command()
+    @commands.command(name="hello", help="Say hello to the bot! Usage: !hello")
     async def hello(self, ctx, *, member: discord.Member = None):
-        """Says hello"""
         member = member or ctx.author
         if self._last_member is None or self._last_member.id != member.id:
-            await ctx.reply(f'Hello {member.name}~')
-        else:
-            await ctx.reply(f'Keep quiet, kitten.')
-        self._last_member = member
+            async with ctx.typing():
+                await ctx.reply(Ejai.Ejai.respond("Hello!"))
 
 async def setup(bot):  
     await bot.add_cog(Greetings(bot)) 

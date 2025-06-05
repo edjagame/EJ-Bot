@@ -1,4 +1,5 @@
 import discord
+import mcstatus
 from discord.ext import commands
 
 import Ejai
@@ -20,6 +21,20 @@ class Greetings(commands.Cog):
         if self._last_member is None or self._last_member.id != member.id:
             async with ctx.typing():
                 await ctx.reply(Ejai.Ejai.respond("Hello!"))
+
+    @commands.command(name="server", help="Shows the current active players in the Minecraft server. Usage: !server")
+    async def server(self, ctx):
+        try:
+            server = mcstatus.JavaServer.lookup("playmore.tedflixapp.xyz:24570")
+            status = server.status()
+            if status.players.sample:
+                player_names = ', '.join(player.name for player in status.players.sample)
+                await ctx.send(f"Players online ({status.players.online}/{status.players.max}): {player_names}")
+            else:
+                await ctx.send(f"No players online. ({status.players.online}/{status.players.max})")
+        except Exception as e:
+            await ctx.send(f"Error fetching server status: {e}")
+
 
 async def setup(bot):  
     await bot.add_cog(Greetings(bot)) 

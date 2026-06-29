@@ -1,0 +1,85 @@
+name: ej-bot
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  bot:
+    build:
+      context: .
+    image: ej-bot:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      LAVALINK_HOST: lavalink
+      LAVALINK_PORT: "2333"
+      LAVALINK_SECURE: "false"
+    depends_on:
+      lavalink:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  lavalink-plugins-init:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - chown -R 322:322 /opt/Lavalink/plugins
+    restart: "no"
+    volumes:
+      - type: volume
+        source: lavalink-plugins
+        target: /opt/Lavalink/plugins
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    logging: *default-logging
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    restart: unless-stopped
+    depends_on:
+      lavalink-plugins-init:
+        condition: service_completed_successfully
+    environment:
+      LAVALINK_PASSWORD: "${LAVALINK_PASSWORD:?Set LAVALINK_PASSWORD in the project .env file}"
+    volumes:
+      - type: bind
+        source: ./lavalink/application.yml
+        target: /opt/Lavalink/application.yml
+        read_only: true
+      - type: volume
+        source: lavalink-plugins
+        target: /opt/Lavalink/plugins
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'wget -q -O /dev/null --header="Authorization: $${LAVALINK_PASSWORD}" http://127.0.0.1:2333/v4/info'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+volumes:
+  lavalink-plugins:

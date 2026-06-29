@@ -1,0 +1,14 @@
+.env
+.git
+.github
+.agents
+.venv
+dist
+docs
+legacy
+node_modules
+test
+lavalink/logs
+lavalink/plugins
+*.log
+*.py[cod]

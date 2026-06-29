@@ -185,6 +185,16 @@ authenticated health endpoint and plugin versions, deploy Discord commands,
 then start the bot. Configure both processes under a supervisor with restart
 policies and retain sanitized logs for incident diagnosis.
 
+## DigitalOcean Droplet deployment
+
+For a single-host production deployment, use the root `Dockerfile` and
+`compose.yml`. They run the bot and Lavalink on a private Compose network,
+publish no application ports, wait for Lavalink health before starting the
+bot, restart failed services, and rotate container logs.
+
+Follow the complete
+[DigitalOcean Droplet deployment runbook](docs/digitalocean-droplet.md).
+
 ## Release acceptance
 
 Automated checks are necessary but cannot verify audible Discord playback.

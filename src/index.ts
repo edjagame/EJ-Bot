@@ -1,29 +1,55 @@
-import { env } from 'node:process';
 import {
 	Client,
 	Events,
 	GatewayIntentBits,
 	MessageFlags,
 } from 'discord.js';
-import { config } from 'dotenv';
+import { loadRuntimeConfig } from './config.js';
 import { loadCommands } from './load-commands.js';
+import {
+	AudioServiceUnavailableError,
+	MusicService,
+} from './music/music-service.js';
+import type { CommandContext } from './command.js';
 import type { InteractionReplyOptions } from 'discord.js';
 
-config();
-
-const token = env.DISCORD_TOKEN;
-
-if (!token) {
-	throw new Error('DISCORD_TOKEN is not set.');
-}
-
+const runtimeConfig = loadRuntimeConfig();
 const commands = await loadCommands();
 const client = new Client({
-	intents: [GatewayIntentBits.Guilds],
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildVoiceStates,
+	],
 });
+const music = new MusicService(client, runtimeConfig.lavalink);
+const commandContext: CommandContext = { music };
 
 client.once(Events.ClientReady, (readyClient) => {
 	console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+
+	void music
+		.initialize({
+			id: readyClient.user.id,
+			username: readyClient.user.username,
+		})
+		.then((connected) => {
+			if (!connected) {
+				console.warn(
+					'The audio service is unavailable after the connection timeout.',
+					{ event: 'node-initialization-timeout' },
+				);
+			}
+		})
+		.catch((error: unknown) => {
+			console.error('Failed to initialize the audio service.', {
+				event: 'node-initialization',
+				error,
+			});
+		});
+});
+
+client.on(Events.Raw, (packet) => {
+	void music.forwardRawData(packet);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -39,12 +65,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	}
 
 	try {
-		await command.execute(interaction);
+		await command.execute(interaction, commandContext);
 	} catch (error) {
-		console.error(error);
+		const audioServiceUnavailable =
+			error instanceof AudioServiceUnavailableError;
+
+		if (audioServiceUnavailable) {
+			console.warn('A command was rejected because Lavalink is unavailable.', {
+				event: 'command-audio-unavailable',
+				command: interaction.commandName,
+				guildId: interaction.guildId,
+			});
+		} else {
+			console.error('Unexpected command failure.', {
+				event: 'command-error',
+				command: interaction.commandName,
+				guildId: interaction.guildId,
+				error,
+			});
+		}
 
 		const response: InteractionReplyOptions = {
-			content: 'There was an error while executing this command.',
+			content: audioServiceUnavailable
+				? 'The audio service is unavailable. Try again later.'
+				: 'Something went wrong while handling that command.',
 			flags: MessageFlags.Ephemeral,
 		};
 
@@ -56,4 +100,4 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	}
 });
 
-await client.login(token);
+await client.login(runtimeConfig.discordToken);

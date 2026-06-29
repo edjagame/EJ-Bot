@@ -1,27 +1,12 @@
-import { env } from 'node:process';
 import { REST, Routes } from 'discord.js';
-import { config } from 'dotenv';
+import { loadDeployConfig } from './config.js';
 import { loadCommands } from './load-commands.js';
 
-function requireEnvironmentVariable(name: string): string {
-	const value = env[name];
-
-	if (!value?.trim()) {
-		throw new Error(`${name} is not set.`);
-	}
-
-	return value;
-}
-
 async function deployCommands(): Promise<void> {
-	config();
-
-	const token = requireEnvironmentVariable('DISCORD_TOKEN');
-	const clientId = requireEnvironmentVariable('CLIENT_ID');
-	const testServerId = requireEnvironmentVariable('TEST_SERVER_ID');
+	const { discordToken, clientId, testServerId } = loadDeployConfig();
 	const commands = await loadCommands();
 	const body = commands.map((command) => command.data.toJSON());
-	const rest = new REST().setToken(token);
+	const rest = new REST().setToken(discordToken);
 
 	console.log(
 		`Deploying ${body.length} command(s) to test guild ${testServerId}...`,

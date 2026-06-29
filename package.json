@@ -7,6 +7,7 @@
   "dev": "tsx src/index.ts",
   "deploy": "tsx src/deploy-commands.ts",
   "build": "tsc",
+  "test": "tsx --test test/config.test.ts",
   "start": "node dist/index.js"
   },
   "repository": {
@@ -23,7 +24,8 @@
   "homepage": "https://github.com/edjagame/EJ-Bot#readme",
   "dependencies": {
     "discord.js": "^14.26.4",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "lavalink-client": "^2.10.3"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

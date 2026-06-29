@@ -16,8 +16,15 @@ Copy `.env.example` to `.env` and configure:
 DISCORD_TOKEN=bot_token
 CLIENT_ID=application_id
 TEST_SERVER_ID=test_server_id
+LAVALINK_HOST=127.0.0.1
+LAVALINK_PORT=2333
 LAVALINK_PASSWORD=change_me
+LAVALINK_SECURE=false
 ```
+
+The bot validates every setting at startup. `LAVALINK_PORT` must be an integer
+from `1` through `65535`, and `LAVALINK_SECURE` must be exactly `true` or
+`false`. Use `true` only when the node is exposed through TLS.
 
 Start the bot in development:
 
@@ -103,6 +110,11 @@ The video and playlist responses should have `loadType` values of `track` and
 `playlist`, respectively, and the playlist should contain at least one track.
 Searches and bare IDs are intentionally disabled and must not return playable
 search or track results. OAuth and proof-of-origin tokens are not configured.
+
+The Discord runtime connects to this node after the bot becomes ready. A node
+outage does not stop non-music commands: connection and load attempts time out,
+the failure is logged without credentials, and music commands report that the
+audio service is unavailable.
 
 Stop the node when it is no longer needed:
 

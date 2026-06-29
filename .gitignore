@@ -2,7 +2,8 @@
 .venv/
 node_modules/
 dist/
-Lavalink/
+lavalink/plugins/
+lavalink/logs/
 config.json
 .agents/
 __pycache__/

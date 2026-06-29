@@ -1,0 +1,36 @@
+services:
+  lavalink-plugins-init:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - chown -R 322:322 /opt/Lavalink/plugins
+    restart: "no"
+    volumes:
+      - type: volume
+        source: lavalink-plugins
+        target: /opt/Lavalink/plugins
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2-alpine
+    restart: unless-stopped
+    depends_on:
+      lavalink-plugins-init:
+        condition: service_completed_successfully
+    environment:
+      LAVALINK_PASSWORD: "${LAVALINK_PASSWORD:?Set LAVALINK_PASSWORD in the project .env file}"
+    ports:
+      - "127.0.0.1:2333:2333"
+    volumes:
+      - type: bind
+        source: ./application.yml
+        target: /opt/Lavalink/application.yml
+        read_only: true
+      - type: volume
+        source: lavalink-plugins
+        target: /opt/Lavalink/plugins
+
+volumes:
+  lavalink-plugins:

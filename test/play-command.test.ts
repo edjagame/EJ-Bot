@@ -3,7 +3,9 @@ import test from 'node:test';
 import type {
 	AudioAdapter,
 	AudioClientIdentity,
+	AudioEventHandlers,
 	AudioLoadResult,
+	AudioPlaybackTrack,
 	AudioPlayerOptions,
 } from '../src/music/audio-adapter.js';
 import playCommand from '../src/commands/music/play.js';
@@ -21,8 +23,10 @@ class CommandAudioAdapter implements AudioAdapter {
 				durationMs: 60_000,
 			},
 		],
-		skippedCount: 0,
+	skippedCount: 0,
 	};
+
+	setEventHandlers(_handlers: AudioEventHandlers): void {}
 
 	async initialize(_client: AudioClientIdentity): Promise<boolean> {
 		return true;
@@ -42,7 +46,16 @@ class CommandAudioAdapter implements AudioAdapter {
 
 	async connect(_guildId: string): Promise<void> {}
 
-	async play(_guildId: string, _encodedTrack: string): Promise<void> {}
+	async play(
+		_guildId: string,
+		_track: AudioPlaybackTrack,
+	): Promise<void> {}
+
+	async stop(_guildId: string): Promise<void> {}
+
+	async pause(_guildId: string): Promise<void> {}
+
+	async resume(_guildId: string): Promise<void> {}
 
 	async destroyPlayer(_guildId: string): Promise<void> {}
 }

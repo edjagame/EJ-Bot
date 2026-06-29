@@ -35,6 +35,22 @@ export interface AudioTrack {
 	readonly durationMs: number;
 }
 
+export interface AudioPlaybackTrack {
+	readonly encoded: string;
+	readonly trackId: string;
+	readonly requestedBy: string;
+}
+
+export interface AudioTrackTerminalEvent {
+	readonly guildId: string;
+	readonly trackId: string;
+	readonly kind: 'finished' | 'failed' | 'stuck';
+}
+
+export interface AudioEventHandlers {
+	onTrackTerminal(event: AudioTrackTerminalEvent): void | Promise<void>;
+}
+
 export interface AudioLoadResult {
 	readonly loadType: 'track' | 'playlist' | 'empty' | 'error';
 	readonly tracks: readonly AudioTrack[];
@@ -44,6 +60,7 @@ export interface AudioLoadResult {
 
 export interface AudioAdapter {
 	readonly isAvailable: boolean;
+	setEventHandlers(handlers: AudioEventHandlers): void;
 	initialize(client: AudioClientIdentity): Promise<boolean>;
 	forwardVoicePacket(data: unknown): Promise<void>;
 	createPlayer(options: AudioPlayerOptions): Promise<void>;
@@ -53,7 +70,10 @@ export interface AudioAdapter {
 		requestedBy: string,
 	): Promise<AudioLoadResult>;
 	connect(guildId: string): Promise<void>;
-	play(guildId: string, encodedTrack: string): Promise<void>;
+	play(guildId: string, track: AudioPlaybackTrack): Promise<void>;
+	stop(guildId: string): Promise<void>;
+	pause(guildId: string): Promise<void>;
+	resume(guildId: string): Promise<void>;
 	destroyPlayer(guildId: string): Promise<void>;
 }
 
@@ -126,6 +146,7 @@ function playerContext(player: Player): Record<string, unknown> {
 export class LavalinkAudioAdapter implements AudioAdapter {
 	readonly #manager: LavalinkManager;
 	#initialization: Promise<boolean> | null = null;
+	#eventHandlers: AudioEventHandlers | null = null;
 
 	constructor(client: Client, config: LavalinkConfig) {
 		this.#manager = new LavalinkManager({
@@ -166,6 +187,10 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 
 	get isAvailable(): boolean {
 		return this.#manager.useable;
+	}
+
+	setEventHandlers(handlers: AudioEventHandlers): void {
+		this.#eventHandlers = handlers;
 	}
 
 	initialize(client: AudioClientIdentity): Promise<boolean> {
@@ -223,11 +248,30 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 		await this.#requirePlayer(guildId).connect();
 	}
 
-	async play(guildId: string, encodedTrack: string): Promise<void> {
+	async play(
+		guildId: string,
+		track: AudioPlaybackTrack,
+	): Promise<void> {
 		await this.#requirePlayer(guildId).play({
-			track: { encoded: encodedTrack },
+			track: {
+				encoded: track.encoded,
+				requester: track.requestedBy,
+				userData: { queueTrackId: track.trackId },
+			},
 			noReplace: false,
 		});
+	}
+
+	async stop(guildId: string): Promise<void> {
+		await this.#requirePlayer(guildId).stopPlaying(false, false);
+	}
+
+	async pause(guildId: string): Promise<void> {
+		await this.#requirePlayer(guildId).pause();
+	}
+
+	async resume(guildId: string): Promise<void> {
+		await this.#requirePlayer(guildId).resume();
 	}
 
 	async destroyPlayer(guildId: string): Promise<void> {
@@ -351,28 +395,107 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 			});
 		});
 
-		this.#manager.on('trackEnd', (player, _track, payload) => {
+		this.#manager.on('trackEnd', (player, track, payload) => {
 			console.log('Lavalink track ended.', {
 				event: 'track-end',
 				...playerContext(player),
 				reason: payload.reason,
 			});
+
+			this.#handleTrackEnd(player.guildId, track, payload);
 		});
 
-		this.#manager.on('trackError', (player, _track, payload) => {
+		this.#manager.on('queueEnd', (player, track, payload) => {
+			console.log('Lavalink queue ended.', {
+				event: 'queue-end',
+				...playerContext(player),
+				payloadType: payload.type,
+				...('reason' in payload ? { reason: payload.reason } : {}),
+			});
+
+			if (payload.type === 'TrackEndEvent') {
+				this.#handleTrackEnd(player.guildId, track, payload);
+			}
+		});
+
+		this.#manager.on('trackError', (player, track, payload) => {
 			console.error('Lavalink track error.', {
 				event: 'track-error',
 				...playerContext(player),
 				exception: payload.exception,
 			});
+
+			this.#emitTerminal(player.guildId, track, 'failed');
 		});
 
-		this.#manager.on('trackStuck', (player, _track, payload) => {
+		this.#manager.on('trackStuck', (player, track, payload) => {
 			console.error('Lavalink track stuck.', {
 				event: 'track-stuck',
 				...playerContext(player),
 				thresholdMs: payload.thresholdMs,
 			});
+
+			this.#emitTerminal(player.guildId, track, 'stuck');
 		});
+	}
+
+	#handleTrackEnd(
+		guildId: string,
+		track: unknown,
+		payload: { reason: string },
+	): void {
+		if (payload.reason === 'finished') {
+			this.#emitTerminal(guildId, track, 'finished');
+		} else if (payload.reason === 'loadFailed') {
+			this.#emitTerminal(guildId, track, 'failed');
+		}
+	}
+
+	#emitTerminal(
+		guildId: string,
+		track: unknown,
+		kind: AudioTrackTerminalEvent['kind'],
+	): void {
+		const trackId = this.#trackId(track);
+
+		if (!trackId) {
+			console.warn('Ignored a Lavalink terminal event without a queue track ID.', {
+				event: 'track-terminal-unidentified',
+				guildId,
+				kind,
+			});
+			return;
+		}
+
+		const event: AudioTrackTerminalEvent = { guildId, trackId, kind };
+
+		Promise.resolve(this.#eventHandlers?.onTrackTerminal(event)).catch(
+			(error: unknown) => {
+				console.error('Failed to handle a Lavalink terminal event.', {
+					event: 'track-terminal-handler',
+					guildId,
+					trackId,
+					kind,
+					error,
+				});
+			},
+		);
+	}
+
+	#trackId(track: unknown): string | null {
+		if (typeof track !== 'object' || track === null) {
+			return null;
+		}
+
+		const userData = (track as { userData?: unknown }).userData;
+
+		if (typeof userData !== 'object' || userData === null) {
+			return null;
+		}
+
+		const trackId = (userData as { queueTrackId?: unknown }).queueTrackId;
+		return typeof trackId === 'string' && trackId.length > 0
+			? trackId
+			: null;
 	}
 }

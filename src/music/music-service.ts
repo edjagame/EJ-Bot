@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type {
 	AudioAdapter,
 	AudioClientIdentity,
+	AudioPlaybackTrack,
+	AudioTrackTerminalEvent,
 } from './audio-adapter.js';
 import type {
 	GuildPlayer,
@@ -20,8 +22,21 @@ interface MutableGuildQueue {
 interface MutableGuildPlayer {
 	guildId: string;
 	voiceChannelId: string;
+	textChannelId: string;
 	state: PlayerState;
 	queue: MutableGuildQueue;
+}
+
+export interface TrackFailureNotification {
+	readonly guildId: string;
+	readonly textChannelId: string;
+	readonly content: string;
+}
+
+export interface MusicServiceOptions {
+	readonly notify?: (
+		notification: TrackFailureNotification,
+	) => void | Promise<void>;
 }
 
 export class AudioServiceUnavailableError extends Error {
@@ -56,6 +71,27 @@ export class VoiceChannelMismatchError extends Error {
 	constructor() {
 		super('The requester is not in the player voice channel.');
 		this.name = 'VoiceChannelMismatchError';
+	}
+}
+
+export class NoCurrentTrackError extends Error {
+	constructor() {
+		super('No track is currently playing.');
+		this.name = 'NoCurrentTrackError';
+	}
+}
+
+export class PlaybackAlreadyPausedError extends Error {
+	constructor() {
+		super('Playback is already paused.');
+		this.name = 'PlaybackAlreadyPausedError';
+	}
+}
+
+export class PlaybackNotPausedError extends Error {
+	constructor() {
+		super('Playback is not paused.');
+		this.name = 'PlaybackNotPausedError';
 	}
 }
 
@@ -95,11 +131,16 @@ function playerSnapshot(player: MutableGuildPlayer): GuildPlayer {
 
 export class MusicService {
 	readonly #audio: AudioAdapter;
+	readonly #notify: NonNullable<MusicServiceOptions['notify']>;
 	readonly #guilds = new Map<string, MutableGuildPlayer>();
 	readonly #mutationTails = new Map<string, Promise<void>>();
 
-	constructor(audio: AudioAdapter) {
+	constructor(audio: AudioAdapter, options: MusicServiceOptions = {}) {
 		this.#audio = audio;
+		this.#notify = options.notify ?? (() => undefined);
+		this.#audio.setEventHandlers({
+			onTrackTerminal: (event) => this.#handleTrackTerminal(event),
+		});
 	}
 
 	get isAvailable(): boolean {
@@ -132,6 +173,7 @@ export class MusicService {
 			const player: MutableGuildPlayer = {
 				guildId,
 				voiceChannelId,
+				textChannelId: '',
 				state: 'idle',
 				queue: {
 					current: null,
@@ -166,6 +208,7 @@ export class MusicService {
 					player = {
 						guildId: request.guildId,
 						voiceChannelId: request.voiceChannelId,
+						textChannelId: request.textChannelId,
 						state: 'idle',
 						queue: {
 							current: null,
@@ -218,13 +261,18 @@ export class MusicService {
 						throw new Error('No track was available to start.');
 					}
 
-					await this.#audio.play(request.guildId, first.encoded);
+					await this.#audio.play(
+						request.guildId,
+						this.#toAudioTrack(first),
+					);
 					player.queue.current = first;
 					player.queue.upcoming = playbackOrder.slice(1);
 					player.state = 'playing';
 				} else {
 					player.queue.upcoming.push(...accepted);
 				}
+
+				player.textChannelId = request.textChannelId;
 
 				return Object.freeze({
 					kind:
@@ -325,6 +373,98 @@ export class MusicService {
 		});
 	}
 
+	skip(guildId: string): Promise<void> {
+		return this.#mutateGuild(guildId, async () => {
+			const player = this.#requireGuild(guildId);
+
+			if (!player.queue.current) {
+				throw new NoCurrentTrackError();
+			}
+
+			this.assertAvailable();
+			const next = player.queue.upcoming[0] ?? null;
+
+			try {
+				if (next) {
+					await this.#audio.play(guildId, this.#toAudioTrack(next));
+				} else {
+					await this.#audio.stop(guildId);
+				}
+			} catch (error) {
+				throw new AudioServiceUnavailableError({ cause: error });
+			}
+
+			player.queue.current = next;
+			player.state = next ? 'playing' : 'idle';
+
+			if (next) {
+				player.queue.upcoming.shift();
+			}
+		});
+	}
+
+	pause(guildId: string): Promise<void> {
+		return this.#mutateGuild(guildId, async () => {
+			const player = this.#requireGuild(guildId);
+
+			if (!player.queue.current) {
+				throw new NoCurrentTrackError();
+			}
+
+			if (player.state === 'paused') {
+				throw new PlaybackAlreadyPausedError();
+			}
+
+			this.assertAvailable();
+
+			try {
+				await this.#audio.pause(guildId);
+			} catch (error) {
+				throw new AudioServiceUnavailableError({ cause: error });
+			}
+
+			player.state = 'paused';
+		});
+	}
+
+	resume(guildId: string): Promise<void> {
+		return this.#mutateGuild(guildId, async () => {
+			const player = this.#requireGuild(guildId);
+
+			if (!player.queue.current) {
+				throw new NoCurrentTrackError();
+			}
+
+			if (player.state !== 'paused') {
+				throw new PlaybackNotPausedError();
+			}
+
+			this.assertAvailable();
+
+			try {
+				await this.#audio.resume(guildId);
+			} catch (error) {
+				throw new AudioServiceUnavailableError({ cause: error });
+			}
+
+			player.state = 'playing';
+		});
+	}
+
+	disconnect(guildId: string): Promise<void> {
+		return this.#mutateGuild(guildId, async () => {
+			this.#requireGuild(guildId);
+
+			try {
+				await this.#audio.destroyPlayer(guildId);
+			} catch (error) {
+				throw new AudioServiceUnavailableError({ cause: error });
+			} finally {
+				this.#guilds.delete(guildId);
+			}
+		});
+	}
+
 	getQueue(guildId: string): GuildQueue | null {
 		const player = this.#guilds.get(guildId);
 		return player ? queueSnapshot(player.queue) : null;
@@ -349,6 +489,93 @@ export class MusicService {
 		player.queue.current = next;
 		player.state = next ? 'playing' : 'idle';
 		return next;
+	}
+
+	async #handleTrackTerminal(
+		event: AudioTrackTerminalEvent,
+	): Promise<void> {
+		const notification = await this.#mutateGuild(
+			event.guildId,
+			async (): Promise<TrackFailureNotification | null> => {
+				const player = this.#guilds.get(event.guildId);
+
+				if (!player || player.queue.current?.id !== event.trackId) {
+					return null;
+				}
+
+				const failureNotification =
+					event.kind === 'finished'
+						? null
+						: {
+								guildId: event.guildId,
+								textChannelId: player.textChannelId,
+								content:
+									'That track could not be played; trying the next queued track.',
+							};
+
+				player.queue.current = null;
+				player.state = 'idle';
+
+				if (event.kind !== 'finished') {
+					try {
+						await this.#audio.stop(event.guildId);
+					} catch (error) {
+						console.error('Failed to stop an errored music track.', {
+							event: 'track-failure-stop',
+							guildId: event.guildId,
+							trackId: event.trackId,
+							error,
+						});
+					}
+				}
+
+				const next = player.queue.upcoming[0];
+
+				if (!next) {
+					return failureNotification;
+				}
+
+				try {
+					await this.#audio.play(
+						event.guildId,
+						this.#toAudioTrack(next),
+					);
+					player.queue.upcoming.shift();
+					player.queue.current = next;
+					player.state = 'playing';
+				} catch (error) {
+					console.error('Failed to start the next queued music track.', {
+						event: 'queue-advance',
+						guildId: event.guildId,
+						trackId: next.id,
+						error,
+					});
+				}
+
+				return failureNotification;
+			},
+		);
+
+		if (notification?.textChannelId) {
+			try {
+				await this.#notify(notification);
+			} catch (error) {
+				console.error('Failed to send a music track failure notification.', {
+					event: 'track-failure-notification',
+					guildId: notification.guildId,
+					textChannelId: notification.textChannelId,
+					error,
+				});
+			}
+		}
+	}
+
+	#toAudioTrack(track: MusicTrack): AudioPlaybackTrack {
+		return {
+			encoded: track.encoded,
+			trackId: track.id,
+			requestedBy: track.requestedBy,
+		};
 	}
 
 	#requireGuild(guildId: string): MutableGuildPlayer {

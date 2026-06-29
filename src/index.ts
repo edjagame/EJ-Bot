@@ -23,7 +23,25 @@ const client = new Client({
 	],
 });
 const audio = new LavalinkAudioAdapter(client, runtimeConfig.lavalink);
-const music = new MusicService(audio);
+const music = new MusicService(audio, {
+	notify: async ({ textChannelId, content }) => {
+		const channel = await client.channels.fetch(textChannelId);
+
+		if (!channel?.isSendable()) {
+			console.warn('Cannot send a music notification to its text channel.', {
+				event: 'music-notification-channel',
+				textChannelId,
+				reason: 'channel-not-sendable',
+			});
+			return;
+		}
+
+		await channel.send({
+			content,
+			allowedMentions: { parse: [] },
+		});
+	},
+});
 const commandContext: CommandContext = { music };
 
 client.once(Events.ClientReady, (readyClient) => {

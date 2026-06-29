@@ -3,13 +3,19 @@ import test from 'node:test';
 import type {
 	AudioAdapter,
 	AudioClientIdentity,
+	AudioEventHandlers,
 	AudioLoadResult,
+	AudioPlaybackTrack,
 	AudioPlayerOptions,
+	AudioTrackTerminalEvent,
 } from '../src/music/audio-adapter.js';
 import {
 	AudioServiceUnavailableError,
 	DuplicateTrackIdError,
 	MusicService,
+	NoCurrentTrackError,
+	PlaybackAlreadyPausedError,
+	PlaybackNotPausedError,
 	PlaylistEmptyError,
 	VoiceChannelMismatchError,
 	type MusicTrack,
@@ -17,6 +23,7 @@ import {
 
 class FakeAudioAdapter implements AudioAdapter {
 	isAvailable = true;
+	eventHandlers: AudioEventHandlers | null = null;
 	loadResult: AudioLoadResult = {
 		loadType: 'track',
 		tracks: [
@@ -35,6 +42,17 @@ class FakeAudioAdapter implements AudioAdapter {
 	readonly destroyedGuilds: string[] = [];
 	connectError: Error | null = null;
 	playError: Error | null = null;
+	readonly stoppedGuilds: string[] = [];
+	readonly pausedGuilds: string[] = [];
+	readonly resumedGuilds: string[] = [];
+
+	setEventHandlers(handlers: AudioEventHandlers): void {
+		this.eventHandlers = handlers;
+	}
+
+	async emitTerminal(event: AudioTrackTerminalEvent): Promise<void> {
+		await this.eventHandlers?.onTrackTerminal(event);
+	}
 
 	async initialize(_client: AudioClientIdentity): Promise<boolean> {
 		return this.isAvailable;
@@ -62,12 +80,27 @@ class FakeAudioAdapter implements AudioAdapter {
 		this.connectedGuilds.push(guildId);
 	}
 
-	async play(guildId: string, encoded: string): Promise<void> {
+	async play(
+		guildId: string,
+		track: AudioPlaybackTrack,
+	): Promise<void> {
 		if (this.playError) {
 			throw this.playError;
 		}
 
-		this.playedTracks.push({ guildId, encoded });
+		this.playedTracks.push({ guildId, encoded: track.encoded });
+	}
+
+	async stop(guildId: string): Promise<void> {
+		this.stoppedGuilds.push(guildId);
+	}
+
+	async pause(guildId: string): Promise<void> {
+		this.pausedGuilds.push(guildId);
+	}
+
+	async resume(guildId: string): Promise<void> {
+		this.resumedGuilds.push(guildId);
 	}
 
 	async destroyPlayer(guildId: string): Promise<void> {
@@ -359,4 +392,156 @@ test('rolls back a new player when connection or initial playback fails', async 
 		assert.equal(music.getGuildPlayer('guild-1'), null);
 		assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
 	}
+});
+
+test('advances on natural completion and ignores duplicate terminal events', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	await music.play(playRequest());
+	const firstTrackId = music.getQueue('guild-1')?.current?.id;
+	const secondTrackId = music.getQueue('guild-1')?.upcoming[0]?.id;
+	assert(firstTrackId);
+	assert(secondTrackId);
+
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: firstTrackId,
+		kind: 'finished',
+	});
+
+	assert.equal(music.getQueue('guild-1')?.current?.id, secondTrackId);
+	assert.equal(music.getQueue('guild-1')?.upcoming.length, 0);
+	assert.equal(audio.playedTracks.length, 2);
+
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: firstTrackId,
+		kind: 'finished',
+	});
+
+	assert.equal(music.getQueue('guild-1')?.current?.id, secondTrackId);
+	assert.equal(audio.playedTracks.length, 2);
+});
+
+test('leaves an exhausted naturally completed queue connected and idle', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	const currentTrackId = music.getQueue('guild-1')?.current?.id;
+	assert(currentTrackId);
+
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: currentTrackId,
+		kind: 'finished',
+	});
+
+	assert.equal(music.getQueue('guild-1')?.current, null);
+	assert.equal(music.getGuildPlayer('guild-1')?.state, 'idle');
+	assert.deepEqual(audio.destroyedGuilds, []);
+});
+
+test('skip advances manually once and stops when no next track exists', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	await music.play(playRequest());
+	const firstTrackId = music.getQueue('guild-1')?.current?.id;
+	const secondTrackId = music.getQueue('guild-1')?.upcoming[0]?.id;
+	assert(firstTrackId);
+	assert(secondTrackId);
+
+	await music.skip('guild-1');
+	assert.equal(music.getQueue('guild-1')?.current?.id, secondTrackId);
+	assert.equal(audio.playedTracks.length, 2);
+
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: firstTrackId,
+		kind: 'finished',
+	});
+	assert.equal(music.getQueue('guild-1')?.current?.id, secondTrackId);
+
+	await music.skip('guild-1');
+	assert.equal(music.getQueue('guild-1')?.current, null);
+	assert.equal(music.getGuildPlayer('guild-1')?.state, 'idle');
+	assert.deepEqual(audio.stoppedGuilds, ['guild-1']);
+	await assert.rejects(music.skip('guild-1'), NoCurrentTrackError);
+});
+
+test('enforces pause and resume state transitions', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+
+	await assert.rejects(
+		music.resume('guild-1'),
+		PlaybackNotPausedError,
+	);
+	await music.pause('guild-1');
+	assert.equal(music.getGuildPlayer('guild-1')?.state, 'paused');
+	assert.deepEqual(audio.pausedGuilds, ['guild-1']);
+	await assert.rejects(
+		music.pause('guild-1'),
+		PlaybackAlreadyPausedError,
+	);
+
+	await music.resume('guild-1');
+	assert.equal(music.getGuildPlayer('guild-1')?.state, 'playing');
+	assert.deepEqual(audio.resumedGuilds, ['guild-1']);
+});
+
+test('notifies and advances once after a failed or stuck track', async () => {
+	const audio = new FakeAudioAdapter();
+	const notifications: Array<{
+		guildId: string;
+		textChannelId: string;
+		content: string;
+	}> = [];
+	const music = new MusicService(audio, {
+		notify: (notification) => {
+			notifications.push(notification);
+		},
+	});
+	await music.play(playRequest());
+	await music.play(playRequest());
+	const failedTrackId = music.getQueue('guild-1')?.current?.id;
+	const nextTrackId = music.getQueue('guild-1')?.upcoming[0]?.id;
+	assert(failedTrackId);
+	assert(nextTrackId);
+
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: failedTrackId,
+		kind: 'stuck',
+	});
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: failedTrackId,
+		kind: 'failed',
+	});
+
+	assert.equal(music.getQueue('guild-1')?.current?.id, nextTrackId);
+	assert.deepEqual(audio.stoppedGuilds, ['guild-1']);
+	assert.deepEqual(notifications, [
+		{
+			guildId: 'guild-1',
+			textChannelId: 'text-1',
+			content:
+				'That track could not be played; trying the next queued track.',
+		},
+	]);
+});
+
+test('disconnect destroys the audio player and clears guild state', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	await music.play(playRequest());
+
+	await music.disconnect('guild-1');
+
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
 });

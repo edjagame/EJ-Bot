@@ -6,6 +6,7 @@ import {
 } from 'discord.js';
 import { loadRuntimeConfig } from './config.js';
 import { loadCommands } from './load-commands.js';
+import { LavalinkAudioAdapter } from './music/audio-adapter.js';
 import {
 	AudioServiceUnavailableError,
 	MusicService,
@@ -21,7 +22,8 @@ const client = new Client({
 		GatewayIntentBits.GuildVoiceStates,
 	],
 });
-const music = new MusicService(client, runtimeConfig.lavalink);
+const audio = new LavalinkAudioAdapter(client, runtimeConfig.lavalink);
+const music = new MusicService(audio);
 const commandContext: CommandContext = { music };
 
 client.once(Events.ClientReady, (readyClient) => {

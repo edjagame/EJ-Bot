@@ -1,19 +1,25 @@
-import type { Client } from 'discord.js';
-import {
-	LavalinkManager,
-	type BotClientOptions,
-	type LavalinkNode,
-	type Player,
-	type VoicePacket,
-} from 'lavalink-client';
-import type { LavalinkConfig } from '../config.js';
+import type {
+	AudioAdapter,
+	AudioClientIdentity,
+} from './audio-adapter.js';
+import type {
+	GuildPlayer,
+	GuildQueue,
+	MusicTrack,
+	PlayerState,
+} from './music-types.js';
 
-const CONNECTION_TIMEOUT_MS = 10_000;
-const LOAD_TIMEOUT_MS = 10_000;
-const RETRY_AMOUNT = 3;
-const RETRY_DELAY_MS = 2_000;
-const RETRY_TIMESPAN_MS = 10_000;
-const NODE_ID = 'main';
+interface MutableGuildQueue {
+	current: MusicTrack | null;
+	upcoming: MusicTrack[];
+}
+
+interface MutableGuildPlayer {
+	guildId: string;
+	voiceChannelId: string;
+	state: PlayerState;
+	queue: MutableGuildQueue;
+}
 
 export class AudioServiceUnavailableError extends Error {
 	constructor() {
@@ -22,65 +28,58 @@ export class AudioServiceUnavailableError extends Error {
 	}
 }
 
-function nodeContext(node: LavalinkNode): Record<string, unknown> {
-	return {
-		nodeId: node.options.id ?? NODE_ID,
-		host: node.options.host,
-		port: node.options.port,
-		secure: node.options.secure ?? false,
-	};
+export class GuildPlayerNotFoundError extends Error {
+	constructor(guildId: string) {
+		super(`No music player exists for guild ${guildId}.`);
+		this.name = 'GuildPlayerNotFoundError';
+	}
 }
 
-function playerContext(player: Player): Record<string, unknown> {
-	return {
+export class GuildPlayerAlreadyExistsError extends Error {
+	constructor(guildId: string) {
+		super(`A music player already exists for guild ${guildId}.`);
+		this.name = 'GuildPlayerAlreadyExistsError';
+	}
+}
+
+export class DuplicateTrackIdError extends Error {
+	constructor(trackId: string) {
+		super(`Track ID ${trackId} already exists in the guild queue.`);
+		this.name = 'DuplicateTrackIdError';
+	}
+}
+
+function freezeTrack(track: MusicTrack): MusicTrack {
+	return Object.freeze({ ...track });
+}
+
+function queueSnapshot(queue: MutableGuildQueue): GuildQueue {
+	return Object.freeze({
+		current: queue.current,
+		upcoming: Object.freeze([...queue.upcoming]),
+	});
+}
+
+function playerSnapshot(player: MutableGuildPlayer): GuildPlayer {
+	return Object.freeze({
 		guildId: player.guildId,
-		...nodeContext(player.node),
-	};
+		voiceChannelId: player.voiceChannelId,
+		state: player.state,
+		queue: queueSnapshot(player.queue),
+	});
 }
 
 export class MusicService {
-	readonly #manager: LavalinkManager;
-	#initialization: Promise<boolean> | null = null;
+	readonly #audio: AudioAdapter;
+	readonly #guilds = new Map<string, MutableGuildPlayer>();
+	readonly #mutationTails = new Map<string, Promise<void>>();
 
-	constructor(client: Client, config: LavalinkConfig) {
-		this.#manager = new LavalinkManager({
-			nodes: [
-				{
-					id: NODE_ID,
-					host: config.host,
-					port: config.port,
-					authorization: config.password,
-					secure: config.secure,
-					requestSignalTimeoutMS: LOAD_TIMEOUT_MS,
-					retryAmount: RETRY_AMOUNT,
-					retryDelay: RETRY_DELAY_MS,
-					retryTimespan: RETRY_TIMESPAN_MS,
-				},
-			],
-			sendToShard: (guildId, payload) => {
-				const guild = client.guilds.cache.get(guildId);
-
-				if (!guild) {
-					console.warn('Cannot send a Lavalink voice payload to Discord.', {
-						event: 'voice-payload',
-						guildId,
-						reason: 'guild-not-cached',
-					});
-					return;
-				}
-
-				guild.shard.send(payload);
-			},
-			autoSkip: false,
-			autoMove: false,
-			autoSkipOnResolveError: false,
-		});
-
-		this.#registerLifecycleLogging();
+	constructor(audio: AudioAdapter) {
+		this.#audio = audio;
 	}
 
 	get isAvailable(): boolean {
-		return this.#manager.useable;
+		return this.#audio.isAvailable;
 	}
 
 	assertAvailable(): void {
@@ -89,142 +88,168 @@ export class MusicService {
 		}
 	}
 
-	initialize(clientData: BotClientOptions): Promise<boolean> {
-		this.#initialization ??= this.#initialize(clientData);
-		return this.#initialization;
+	initialize(client: AudioClientIdentity): Promise<boolean> {
+		return this.#audio.initialize(client);
 	}
 
-	async forwardRawData(data: unknown): Promise<void> {
-		try {
-			await this.#manager.sendRawData(data as VoicePacket);
-		} catch (error) {
-			console.error('Failed to forward a Discord voice event to Lavalink.', {
-				event: 'voice-packet',
-				error,
-			});
-		}
+	forwardRawData(data: unknown): Promise<void> {
+		return this.#audio.forwardVoicePacket(data);
 	}
 
-	async #initialize(clientData: BotClientOptions): Promise<boolean> {
-		await this.#manager.init(clientData);
+	createGuildPlayer(
+		guildId: string,
+		voiceChannelId: string,
+	): Promise<GuildPlayer> {
+		return this.#mutateGuild(guildId, () => {
+			if (this.#guilds.has(guildId)) {
+				throw new GuildPlayerAlreadyExistsError(guildId);
+			}
 
-		if (this.isAvailable) {
-			return true;
-		}
+			const player: MutableGuildPlayer = {
+				guildId,
+				voiceChannelId,
+				state: 'idle',
+				queue: {
+					current: null,
+					upcoming: [],
+				},
+			};
 
-		return new Promise<boolean>((resolve) => {
-			let settled = false;
+			this.#guilds.set(guildId, player);
+			return playerSnapshot(player);
+		});
+	}
 
-			const finish = (connected: boolean): void => {
-				if (settled) {
-					return;
+	enqueue(guildId: string, tracks: readonly MusicTrack[]): Promise<GuildQueue> {
+		return this.#mutateGuild(guildId, () => {
+			const player = this.#requireGuild(guildId);
+			const usedIds = new Set<string>();
+
+			if (player.queue.current) {
+				usedIds.add(player.queue.current.id);
+			}
+
+			for (const track of player.queue.upcoming) {
+				usedIds.add(track.id);
+			}
+
+			const accepted: MusicTrack[] = [];
+
+			for (const track of tracks) {
+				if (usedIds.has(track.id)) {
+					throw new DuplicateTrackIdError(track.id);
 				}
 
-				settled = true;
-				clearTimeout(timeout);
-				this.#manager.nodeManager.off('connect', onConnect);
-				this.#manager.nodeManager.off('destroy', onDestroy);
-				resolve(connected);
-			};
+				usedIds.add(track.id);
+				accepted.push(freezeTrack(track));
+			}
 
-			const onConnect = (): void => {
-				finish(true);
-			};
-
-			const onDestroy = (): void => {
-				if (!this.isAvailable) {
-					finish(false);
-				}
-			};
-
-			const timeout = setTimeout(() => {
-				finish(this.isAvailable);
-			}, CONNECTION_TIMEOUT_MS);
-
-			this.#manager.nodeManager.on('connect', onConnect);
-			this.#manager.nodeManager.on('destroy', onDestroy);
+			player.queue.upcoming.push(...accepted);
+			return queueSnapshot(player.queue);
 		});
 	}
 
-	#registerLifecycleLogging(): void {
-		const nodes = this.#manager.nodeManager;
+	startNext(guildId: string): Promise<MusicTrack | null> {
+		return this.#mutateGuild(guildId, () => {
+			const player = this.#requireGuild(guildId);
 
-		nodes.on('connect', (node) => {
-			console.log('Connected to Lavalink.', {
-				event: 'node-connect',
-				...nodeContext(node),
-			});
-		});
+			if (player.queue.current) {
+				return player.queue.current;
+			}
 
-		nodes.on('disconnect', (node, reason) => {
-			console.warn('Disconnected from Lavalink.', {
-				event: 'node-disconnect',
-				...nodeContext(node),
-				reason,
-			});
+			return this.#startNext(player);
 		});
+	}
 
-		nodes.on('reconnectinprogress', (node) => {
-			console.warn('Lavalink reconnection scheduled.', {
-				event: 'node-reconnect-pending',
-				...nodeContext(node),
-			});
-		});
+	completeCurrent(
+		guildId: string,
+		expectedTrackId: string,
+	): Promise<MusicTrack | null> {
+		return this.#mutateGuild(guildId, () => {
+			const player = this.#requireGuild(guildId);
 
-		nodes.on('reconnecting', (node) => {
-			console.warn('Reconnecting to Lavalink.', {
-				event: 'node-reconnecting',
-				...nodeContext(node),
-			});
-		});
+			if (player.queue.current?.id !== expectedTrackId) {
+				return null;
+			}
 
-		nodes.on('destroy', (node, reason) => {
-			console.warn('Lavalink node was destroyed.', {
-				event: 'node-destroy',
-				...nodeContext(node),
-				reason,
-			});
+			player.queue.current = null;
+			player.state = 'idle';
+			return this.#startNext(player);
 		});
+	}
 
-		nodes.on('error', (node, error, payload) => {
-			console.error('Lavalink node error.', {
-				event: 'node-error',
-				...nodeContext(node),
-				error,
-				payload,
-			});
-		});
+	getQueue(guildId: string): GuildQueue | null {
+		const player = this.#guilds.get(guildId);
+		return player ? queueSnapshot(player.queue) : null;
+	}
 
-		this.#manager.on('playerDestroy', (player, reason) => {
-			console.warn('Lavalink player was destroyed.', {
-				event: 'player-destroy',
-				...playerContext(player),
-				reason,
-			});
-		});
+	getGuildPlayer(guildId: string): GuildPlayer | null {
+		const player = this.#guilds.get(guildId);
+		return player ? playerSnapshot(player) : null;
+	}
 
-		this.#manager.on('trackEnd', (player, _track, payload) => {
-			console.log('Lavalink track ended.', {
-				event: 'track-end',
-				...playerContext(player),
-				reason: payload.reason,
-			});
-		});
+	resetGuild(guildId: string): Promise<boolean> {
+		return this.#mutateGuild(guildId, () => this.#guilds.delete(guildId));
+	}
 
-		this.#manager.on('trackError', (player, _track, payload) => {
-			console.error('Lavalink track error.', {
-				event: 'track-error',
-				...playerContext(player),
-				exception: payload.exception,
-			});
-		});
+	async resetAll(): Promise<void> {
+		await Promise.all(this.#mutationTails.values());
+		this.#guilds.clear();
+	}
 
-		this.#manager.on('trackStuck', (player, _track, payload) => {
-			console.error('Lavalink track stuck.', {
-				event: 'track-stuck',
-				...playerContext(player),
-				thresholdMs: payload.thresholdMs,
-			});
-		});
+	#startNext(player: MutableGuildPlayer): MusicTrack | null {
+		const next = player.queue.upcoming.shift() ?? null;
+		player.queue.current = next;
+		player.state = next ? 'playing' : 'idle';
+		return next;
+	}
+
+	#requireGuild(guildId: string): MutableGuildPlayer {
+		const player = this.#guilds.get(guildId);
+
+		if (!player) {
+			throw new GuildPlayerNotFoundError(guildId);
+		}
+
+		return player;
+	}
+
+	#mutateGuild<Result>(
+		guildId: string,
+		operation: () => Result | Promise<Result>,
+	): Promise<Result> {
+		const previous = this.#mutationTails.get(guildId) ?? Promise.resolve();
+		const result = previous.then(operation);
+		const tail = result.then(
+			() => undefined,
+			() => undefined,
+		);
+
+		this.#mutationTails.set(guildId, tail);
+
+		return result.then(
+			(value) => {
+				this.#clearMutationTail(guildId, tail);
+				return value;
+			},
+			(error: unknown) => {
+				this.#clearMutationTail(guildId, tail);
+				throw error;
+			},
+		);
+	}
+
+	#clearMutationTail(guildId: string, tail: Promise<void>): void {
+		if (this.#mutationTails.get(guildId) === tail) {
+			this.#mutationTails.delete(guildId);
+		}
 	}
 }
+
+export type {
+	GuildPlayer,
+	GuildQueue,
+	MusicTrack,
+	PlayerState,
+	PlayResult,
+} from './music-types.js';

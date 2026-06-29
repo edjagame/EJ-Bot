@@ -1,7 +1,4 @@
-import {
-	MessageFlags,
-	type ChatInputCommandInteraction,
-} from 'discord.js';
+import type { Message } from 'discord.js';
 import type { GuildPlayer } from './music-types.js';
 import {
 	GuildPlayerNotFoundError,
@@ -16,57 +13,57 @@ export interface ControlCommandContext {
 	readonly player: GuildPlayer;
 }
 
-export async function replyEphemeral(
-	interaction: ChatInputCommandInteraction,
+export async function replyToMessage(
+	message: Message,
 	content: string,
 ): Promise<void> {
-	await interaction.reply({
+	await message.reply({
 		content,
-		flags: MessageFlags.Ephemeral,
+		allowedMentions: { repliedUser: false },
 	});
 }
 
 export async function requireControlContext(
-	interaction: ChatInputCommandInteraction,
+	message: Message,
 	music: MusicService,
 ): Promise<ControlCommandContext | null> {
-	if (!interaction.inCachedGuild()) {
-		await replyEphemeral(
-			interaction,
+	if (!message.inGuild()) {
+		await replyToMessage(
+			message,
 			'This command can only be used in a server.',
 		);
 		return null;
 	}
 
-	const player = music.getGuildPlayer(interaction.guildId);
+	const player = music.getGuildPlayer(message.guildId);
 
 	if (!player) {
-		await replyEphemeral(
-			interaction,
+		await replyToMessage(
+			message,
 			'Nothing is playing in this server.',
 		);
 		return null;
 	}
 
-	const voiceChannelId = interaction.member.voice.channelId;
+	const voiceChannelId = message.member?.voice.channelId;
 
 	if (!voiceChannelId) {
-		await replyEphemeral(
-			interaction,
+		await replyToMessage(
+			message,
 			'Join my voice channel to use this control.',
 		);
 		return null;
 	}
 
 	if (voiceChannelId !== player.voiceChannelId) {
-		await replyEphemeral(
-			interaction,
+		await replyToMessage(
+			message,
 			'You must be in my voice channel to use this command.',
 		);
 		return null;
 	}
 
-	return { guildId: interaction.guildId, player };
+	return { guildId: message.guildId, player };
 }
 
 export function controlErrorMessage(error: unknown): string | null {

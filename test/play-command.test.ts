@@ -64,17 +64,15 @@ class CommandAudioAdapter implements AudioAdapter {
 	async shutdown(): Promise<void> {}
 }
 
-interface InteractionOptions {
-	readonly cachedGuild?: boolean;
+interface MessageOptions {
+	readonly inGuild?: boolean;
 	readonly url?: string;
 	readonly voiceChannelId?: string | null;
 	readonly hasPermissions?: boolean;
 }
 
-function interaction(options: InteractionOptions = {}) {
+function message(options: MessageOptions = {}) {
 	const replies: string[] = [];
-	const edits: string[] = [];
-	let deferred = 0;
 	const voiceChannelId =
 		options.voiceChannelId === undefined ? 'voice-1' : options.voiceChannelId;
 	const voiceChannel =
@@ -89,44 +87,41 @@ function interaction(options: InteractionOptions = {}) {
 
 	return {
 		value: {
-			inCachedGuild: () => options.cachedGuild ?? true,
-			options: {
-				getString: () =>
-					options.url ?? 'https://www.youtube.com/watch?v=track',
-			},
+			inGuild: () => options.inGuild ?? true,
 			member: { voice: { channel: voiceChannel } },
 			guild: { members: { me: { id: 'bot-id' } } },
 			guildId: 'guild-1',
 			channelId: 'text-1',
-			user: { id: 'user-1' },
+			author: { id: 'user-1' },
 			reply: async (response: string | { content: string }) => {
 				replies.push(
 					typeof response === 'string' ? response : response.content,
 				);
 			},
-			deferReply: async () => {
-				deferred += 1;
-			},
-			editReply: async (response: string | { content: string }) => {
-				edits.push(
-					typeof response === 'string' ? response : response.content,
-				);
-			},
 		},
 		replies,
-		edits,
-		get deferred() {
-			return deferred;
-		},
 	};
 }
 
-test('rejects /play outside a cached guild', async () => {
-	const target = interaction({ cachedGuild: false });
+function commandContext(music: MusicService) {
+	return { music, commands: new Map() };
+}
+
+function urlArgs(options: MessageOptions): string[] {
+	return [
+		options.url ?? 'https://www.youtube.com/watch?v=track',
+	];
+}
+
+test('rejects e!play outside a guild', async () => {
+	const options = { inGuild: false };
+	const target = message(options);
+	const music = new MusicService(new CommandAudioAdapter());
 
 	await playCommand.execute(
 		target.value as never,
-		{ music: new MusicService(new CommandAudioAdapter()) },
+		urlArgs(options),
+		commandContext(music),
 	);
 
 	assert.deepEqual(target.replies, [
@@ -137,17 +132,27 @@ test('rejects /play outside a cached guild', async () => {
 test('rejects invalid URLs and requesters outside voice', async () => {
 	const audio = new CommandAudioAdapter();
 	const music = new MusicService(audio);
-	const invalid = interaction({ url: 'plain text' });
-	const noVoice = interaction({ voiceChannelId: null });
+	const invalidOptions = { url: 'plain text' };
+	const noVoiceOptions = { voiceChannelId: null };
+	const invalid = message(invalidOptions);
+	const noVoice = message(noVoiceOptions);
 
-	await playCommand.execute(invalid.value as never, { music });
-	await playCommand.execute(noVoice.value as never, { music });
+	await playCommand.execute(
+		invalid.value as never,
+		urlArgs(invalidOptions),
+		commandContext(music),
+	);
+	await playCommand.execute(
+		noVoice.value as never,
+		urlArgs(noVoiceOptions),
+		commandContext(music),
+	);
 
 	assert.deepEqual(invalid.replies, [
 		'Provide a valid YouTube video or playlist URL.',
 	]);
 	assert.deepEqual(noVoice.replies, [
-		'Join a voice channel before using /play.',
+		'Join a voice channel before using e!play.',
 	]);
 	assert.equal(audio.loadCount, 0);
 });
@@ -155,15 +160,23 @@ test('rejects invalid URLs and requesters outside voice', async () => {
 test('enforces same-channel and bot permission checks', async () => {
 	const music = new MusicService(new CommandAudioAdapter());
 	await music.createGuildPlayer('guild-1', 'voice-1');
-	const wrongChannel = interaction({ voiceChannelId: 'voice-2' });
+	const wrongChannelOptions = { voiceChannelId: 'voice-2' };
+	const wrongChannel = message(wrongChannelOptions);
 
-	await playCommand.execute(wrongChannel.value as never, { music });
+	await playCommand.execute(
+		wrongChannel.value as never,
+		urlArgs(wrongChannelOptions),
+		commandContext(music),
+	);
 
-	const missingPermissions = interaction({ hasPermissions: false });
+	const missingPermissionsOptions = { hasPermissions: false };
+	const missingPermissions = message(missingPermissionsOptions);
 	const freshMusic = new MusicService(new CommandAudioAdapter());
-	await playCommand.execute(missingPermissions.value as never, {
-		music: freshMusic,
-	});
+	await playCommand.execute(
+		missingPermissions.value as never,
+		urlArgs(missingPermissionsOptions),
+		commandContext(freshMusic),
+	);
 
 	assert.deepEqual(wrongChannel.replies, [
 		'You must be in my voice channel to use this command.',
@@ -173,17 +186,16 @@ test('enforces same-channel and bot permission checks', async () => {
 	]);
 });
 
-test('defers a valid request and edits it with the playback result', async () => {
-	const target = interaction();
+test('replies to a valid request with the playback result', async () => {
+	const target = message();
 
 	await playCommand.execute(
 		target.value as never,
-		{ music: new MusicService(new CommandAudioAdapter()) },
+		urlArgs({}),
+		commandContext(new MusicService(new CommandAudioAdapter())),
 	);
 
-	assert.equal(target.deferred, 1);
-	assert.deepEqual(target.replies, []);
-	assert.deepEqual(target.edits, [
+	assert.deepEqual(target.replies, [
 		'Now playing: [A \\[track\\]](https://www.youtube.com/watch?v=track)',
 	]);
 });
@@ -195,11 +207,13 @@ test('maps unavailable videos and empty playlists to user-facing errors', async 
 		tracks: [],
 		skippedCount: 0,
 	};
-	const unavailableVideo = interaction();
+	const unavailableVideo = message();
 
-	await playCommand.execute(unavailableVideo.value as never, {
-		music: new MusicService(videoAudio),
-	});
+	await playCommand.execute(
+		unavailableVideo.value as never,
+		urlArgs({}),
+		commandContext(new MusicService(videoAudio)),
+	);
 
 	const playlistAudio = new CommandAudioAdapter();
 	playlistAudio.loadResult = {
@@ -207,18 +221,21 @@ test('maps unavailable videos and empty playlists to user-facing errors', async 
 		tracks: [],
 		skippedCount: 0,
 	};
-	const emptyPlaylist = interaction({
+	const emptyPlaylistOptions = {
 		url: 'https://www.youtube.com/playlist?list=empty-playlist',
-	});
+	};
+	const emptyPlaylist = message(emptyPlaylistOptions);
 
-	await playCommand.execute(emptyPlaylist.value as never, {
-		music: new MusicService(playlistAudio),
-	});
+	await playCommand.execute(
+		emptyPlaylist.value as never,
+		urlArgs(emptyPlaylistOptions),
+		commandContext(new MusicService(playlistAudio)),
+	);
 
-	assert.deepEqual(unavailableVideo.edits, [
+	assert.deepEqual(unavailableVideo.replies, [
 		'That video is unavailable or cannot be played.',
 	]);
-	assert.deepEqual(emptyPlaylist.edits, [
+	assert.deepEqual(emptyPlaylist.replies, [
 		'That playlist has no playable videos.',
 	]);
 });

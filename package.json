@@ -5,7 +5,6 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "deploy": "tsx src/deploy-commands.ts",
     "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsc",
     "test": "npm run test:unit",

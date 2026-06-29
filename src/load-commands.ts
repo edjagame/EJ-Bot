@@ -12,7 +12,9 @@ function isCommand(value: unknown): value is Command {
 	const candidate = value as Partial<Command>;
 
 	return (
-		typeof candidate.data?.name === 'string' &&
+		typeof candidate.name === 'string' &&
+		typeof candidate.description === 'string' &&
+		typeof candidate.usage === 'string' &&
 		typeof candidate.execute === 'function'
 	);
 }
@@ -47,10 +49,16 @@ export async function loadCommands(): Promise<Collection<string, Command>> {
 					: undefined;
 
 			if (isCommand(command)) {
-				commands.set(command.data.name, command);
+				const name = command.name.toLowerCase();
+
+				if (commands.has(name)) {
+					throw new Error(`Duplicate command name "${name}".`);
+				}
+
+				commands.set(name, command);
 			} else {
 				console.warn(
-					`[WARNING] The command at ${filePath} is missing a valid "data" or "execute" property.`,
+					`[WARNING] The command at ${filePath} is missing valid metadata or an "execute" property.`,
 				);
 			}
 		}

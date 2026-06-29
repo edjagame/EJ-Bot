@@ -1,6 +1,5 @@
-import { SlashCommandBuilder } from 'discord.js';
 import type { Command } from '../../command.js';
-import { replyEphemeral } from '../../music/music-command-helpers.js';
+import { replyToMessage } from '../../music/music-command-helpers.js';
 import { trackLink } from '../../music/music-format.js';
 import type {
 	GuildQueue,
@@ -68,25 +67,25 @@ export function formatQueue(queue: GuildQueue): string {
 }
 
 const command: Command = {
-	data: new SlashCommandBuilder()
-		.setName('queue')
-		.setDescription('Shows the current music queue.')
-		.setDMPermission(false),
-	async execute(interaction, { music }): Promise<void> {
-		if (!interaction.inCachedGuild()) {
-			await replyEphemeral(
-				interaction,
+	name: 'queue',
+	description: 'Shows the current music queue.',
+	usage: 'queue',
+	guildOnly: true,
+	async execute(message, _args, { music }): Promise<void> {
+		if (!message.inGuild()) {
+			await replyToMessage(
+				message,
 				'This command can only be used in a server.',
 			);
 			return;
 		}
 
-		const queue = music.getQueue(interaction.guildId);
+		const queue = music.getQueue(message.guildId);
 		const content = queue ? formatQueue(queue) : 'The queue is empty.';
 
-		await interaction.reply({
+		await message.reply({
 			content,
-			allowedMentions: { parse: [] },
+			allowedMentions: { parse: [], repliedUser: false },
 		});
 	},
 };

@@ -1,16 +1,18 @@
-import { SlashCommandBuilder } from 'discord.js';
 import type { Command } from '../../command.js';
 
 const command: Command = {
-	data: new SlashCommandBuilder().setName('user').setDescription('Provides information about the user.'),
-	async execute(interaction): Promise<void> {
-		if (!interaction.inCachedGuild()) {
-			await interaction.reply('This command can only be used in a server.');
+	name: 'user',
+	description: 'Provides information about the user.',
+	usage: 'user',
+	guildOnly: true,
+	async execute(message): Promise<void> {
+		if (!message.inGuild() || !message.member) {
+			await message.reply('This command can only be used in a server.');
 			return;
 		}
 
-		await interaction.reply(
-			`This command was run by ${interaction.user.username}, who joined on ${interaction.member.joinedAt}.`,
+		await message.reply(
+			`This command was run by ${message.author.username}, who joined on ${message.member.joinedAt}.`,
 		);
 	},
 };

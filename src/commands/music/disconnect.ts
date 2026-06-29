@@ -1,18 +1,17 @@
-import { SlashCommandBuilder } from 'discord.js';
 import type { Command } from '../../command.js';
 import {
 	controlErrorMessage,
-	replyEphemeral,
+	replyToMessage,
 	requireControlContext,
 } from '../../music/music-command-helpers.js';
 
 const command: Command = {
-	data: new SlashCommandBuilder()
-		.setName('disconnect')
-		.setDescription('Disconnects and clears the music queue.')
-		.setDMPermission(false),
-	async execute(interaction, { music }): Promise<void> {
-		const context = await requireControlContext(interaction, music);
+	name: 'disconnect',
+	description: 'Disconnects and clears the music queue.',
+	usage: 'disconnect',
+	guildOnly: true,
+	async execute(message, _args, { music }): Promise<void> {
+		const context = await requireControlContext(message, music);
 
 		if (!context) {
 			return;
@@ -20,15 +19,15 @@ const command: Command = {
 
 		try {
 			await music.disconnect(context.guildId);
-			await interaction.reply('Disconnected and cleared the queue.');
+			await message.reply('Disconnected and cleared the queue.');
 		} catch (error) {
-			const message = controlErrorMessage(error);
+			const errorMessage = controlErrorMessage(error);
 
-			if (!message) {
+			if (!errorMessage) {
 				throw error;
 			}
 
-			await replyEphemeral(interaction, message);
+			await replyToMessage(message, errorMessage);
 		}
 	},
 };

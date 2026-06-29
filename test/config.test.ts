@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadDeployConfig, loadRuntimeConfig } from '../src/config.js';
+import { loadRuntimeConfig } from '../src/config.js';
 
 const validEnvironment = {
 	DISCORD_TOKEN: 'discord-secret',
-	CLIENT_ID: 'application-id',
-	TEST_SERVER_ID: 'test-server-id',
 	LAVALINK_HOST: '127.0.0.1',
 	LAVALINK_PORT: '2333',
 	LAVALINK_PASSWORD: 'lavalink-secret',
@@ -15,8 +13,6 @@ const validEnvironment = {
 test('loads and converts a valid runtime configuration', () => {
 	assert.deepEqual(loadRuntimeConfig(validEnvironment), {
 		discordToken: 'discord-secret',
-		clientId: 'application-id',
-		testServerId: 'test-server-id',
 		lavalink: {
 			host: '127.0.0.1',
 			port: 2333,
@@ -27,21 +23,6 @@ test('loads and converts a valid runtime configuration', () => {
 			emptyChannelGraceMs: 30_000,
 		},
 	});
-});
-
-test('loads deploy configuration without requiring Lavalink settings', () => {
-	assert.deepEqual(
-		loadDeployConfig({
-			DISCORD_TOKEN: 'discord-secret',
-			CLIENT_ID: 'application-id',
-			TEST_SERVER_ID: 'test-server-id',
-		}),
-		{
-			discordToken: 'discord-secret',
-			clientId: 'application-id',
-			testServerId: 'test-server-id',
-		},
-	);
 });
 
 for (const name of Object.keys(validEnvironment)) {

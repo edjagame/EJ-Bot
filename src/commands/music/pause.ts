@@ -1,18 +1,17 @@
-import { SlashCommandBuilder } from 'discord.js';
 import type { Command } from '../../command.js';
 import {
 	controlErrorMessage,
-	replyEphemeral,
+	replyToMessage,
 	requireControlContext,
 } from '../../music/music-command-helpers.js';
 
 const command: Command = {
-	data: new SlashCommandBuilder()
-		.setName('pause')
-		.setDescription('Pauses the current track.')
-		.setDMPermission(false),
-	async execute(interaction, { music }): Promise<void> {
-		const context = await requireControlContext(interaction, music);
+	name: 'pause',
+	description: 'Pauses the current track.',
+	usage: 'pause',
+	guildOnly: true,
+	async execute(message, _args, { music }): Promise<void> {
+		const context = await requireControlContext(message, music);
 
 		if (!context) {
 			return;
@@ -20,15 +19,15 @@ const command: Command = {
 
 		try {
 			await music.pause(context.guildId);
-			await interaction.reply('Playback paused.');
+			await message.reply('Playback paused.');
 		} catch (error) {
-			const message = controlErrorMessage(error);
+			const errorMessage = controlErrorMessage(error);
 
-			if (!message) {
+			if (!errorMessage) {
 				throw error;
 			}
 
-			await replyEphemeral(interaction, message);
+			await replyToMessage(message, errorMessage);
 		}
 	},
 };

@@ -2,26 +2,27 @@ import {
 	Client,
 	Events,
 	GatewayIntentBits,
-	MessageFlags,
+	Partials,
 } from 'discord.js';
 import { loadRuntimeConfig } from './config.js';
 import { loadCommands } from './load-commands.js';
+import { handleMessageCommand } from './message-command-handler.js';
 import { LavalinkAudioAdapter } from './music/audio-adapter.js';
-import {
-	AudioServiceUnavailableError,
-	MusicService,
-} from './music/music-service.js';
+import { MusicService } from './music/music-service.js';
 import { handleVoiceStateCleanup } from './music/voice-state-cleanup.js';
 import type { CommandContext } from './command.js';
-import type { InteractionReplyOptions } from 'discord.js';
 
 const runtimeConfig = loadRuntimeConfig();
 const commands = await loadCommands();
 const client = new Client({
 	intents: [
 		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.DirectMessages,
+		GatewayIntentBits.MessageContent,
 		GatewayIntentBits.GuildVoiceStates,
 	],
+	partials: [Partials.Channel],
 });
 const audio = new LavalinkAudioAdapter(client, runtimeConfig.lavalink);
 const music = new MusicService(audio, {
@@ -44,7 +45,7 @@ const music = new MusicService(audio, {
 		});
 	},
 });
-const commandContext: CommandContext = { music };
+const commandContext: CommandContext = { music, commands };
 let isShuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
 
@@ -121,63 +122,8 @@ client.on(Events.VoiceStateUpdate, (_oldState, newState) => {
 	}
 });
 
-client.on(Events.InteractionCreate, async (interaction) => {
-	if (!interaction.isChatInputCommand()) {
-		return;
-	}
-
-	if (isShuttingDown) {
-		await interaction.reply({
-			content: 'The bot is shutting down. Try again after it restarts.',
-			flags: MessageFlags.Ephemeral,
-		});
-		return;
-	}
-
-	const command = commands.get(interaction.commandName);
-
-	if (!command) {
-		console.error(`No command matching ${interaction.commandName} was found.`);
-		return;
-	}
-
-	try {
-		await command.execute(interaction, commandContext);
-	} catch (error) {
-		const audioServiceUnavailable =
-			error instanceof AudioServiceUnavailableError;
-
-		if (audioServiceUnavailable) {
-			console.warn('A command was rejected because Lavalink is unavailable.', {
-				event: 'command-audio-unavailable',
-				command: interaction.commandName,
-				guildId: interaction.guildId,
-				error,
-			});
-		} else {
-			console.error('Unexpected command failure.', {
-				event: 'command-error',
-				command: interaction.commandName,
-				guildId: interaction.guildId,
-				error,
-			});
-		}
-
-		const response: InteractionReplyOptions = {
-			content: audioServiceUnavailable
-				? 'The audio service is unavailable. Try again later.'
-				: 'Something went wrong while handling that command.',
-			flags: MessageFlags.Ephemeral,
-		};
-
-		if (interaction.deferred && !interaction.replied) {
-			await interaction.editReply({ content: response.content });
-		} else if (interaction.replied) {
-			await interaction.followUp(response);
-		} else {
-			await interaction.reply(response);
-		}
-	}
+client.on(Events.MessageCreate, (message) => {
+	void handleMessageCommand(message, commandContext, { isShuttingDown });
 });
 
 await client.login(runtimeConfig.discordToken);

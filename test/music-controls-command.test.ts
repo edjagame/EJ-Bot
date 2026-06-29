@@ -83,18 +83,18 @@ class ControlAudioAdapter implements AudioAdapter {
 	async shutdown(): Promise<void> {}
 }
 
-interface InteractionOptions {
-	readonly cachedGuild?: boolean;
+interface MessageOptions {
+	readonly inGuild?: boolean;
 	readonly voiceChannelId?: string | null;
 }
 
-function interaction(options: InteractionOptions = {}) {
+function message(options: MessageOptions = {}) {
 	const replies: Array<string | { content: string; allowedMentions?: unknown }> =
 		[];
 
 	return {
 		value: {
-			inCachedGuild: () => options.cachedGuild ?? true,
+			inGuild: () => options.inGuild ?? true,
 			guildId: 'guild-1',
 			member: {
 				voice: {
@@ -122,6 +122,10 @@ function interaction(options: InteractionOptions = {}) {
 	};
 }
 
+function commandContext(music: MusicService) {
+	return { music, commands: new Map() };
+}
+
 async function playingService(
 	audio = new ControlAudioAdapter(),
 ): Promise<{ audio: ControlAudioAdapter; music: MusicService }> {
@@ -140,21 +144,33 @@ async function playingService(
 test('control commands enforce guild, player, and same-channel requirements', async () => {
 	const audio = new ControlAudioAdapter();
 	const music = new MusicService(audio);
-	const outsideGuild = interaction({ cachedGuild: false });
-	const noPlayer = interaction();
+	const outsideGuild = message({ inGuild: false });
+	const noPlayer = message();
 
-	await skipCommand.execute(outsideGuild.value as never, { music });
-	await skipCommand.execute(noPlayer.value as never, { music });
+	await skipCommand.execute(
+		outsideGuild.value as never,
+		[],
+		commandContext(music),
+	);
+	await skipCommand.execute(
+		noPlayer.value as never,
+		[],
+		commandContext(music),
+	);
 
 	const playing = await playingService();
-	const noVoice = interaction({ voiceChannelId: null });
-	const wrongVoice = interaction({ voiceChannelId: 'voice-2' });
-	await skipCommand.execute(noVoice.value as never, {
-		music: playing.music,
-	});
-	await skipCommand.execute(wrongVoice.value as never, {
-		music: playing.music,
-	});
+	const noVoice = message({ voiceChannelId: null });
+	const wrongVoice = message({ voiceChannelId: 'voice-2' });
+	await skipCommand.execute(
+		noVoice.value as never,
+		[],
+		commandContext(playing.music),
+	);
+	await skipCommand.execute(
+		wrongVoice.value as never,
+		[],
+		commandContext(playing.music),
+	);
 
 	assert.deepEqual(outsideGuild.contents(), [
 		'This command can only be used in a server.',
@@ -172,15 +188,27 @@ test('control commands enforce guild, player, and same-channel requirements', as
 
 test('pause and resume commands report success and invalid states', async () => {
 	const { audio, music } = await playingService();
-	const pause = interaction();
-	const pauseAgain = interaction();
-	const resume = interaction();
-	const resumeAgain = interaction();
+	const pause = message();
+	const pauseAgain = message();
+	const resume = message();
+	const resumeAgain = message();
 
-	await pauseCommand.execute(pause.value as never, { music });
-	await pauseCommand.execute(pauseAgain.value as never, { music });
-	await resumeCommand.execute(resume.value as never, { music });
-	await resumeCommand.execute(resumeAgain.value as never, { music });
+	await pauseCommand.execute(pause.value as never, [], commandContext(music));
+	await pauseCommand.execute(
+		pauseAgain.value as never,
+		[],
+		commandContext(music),
+	);
+	await resumeCommand.execute(
+		resume.value as never,
+		[],
+		commandContext(music),
+	);
+	await resumeCommand.execute(
+		resumeAgain.value as never,
+		[],
+		commandContext(music),
+	);
 
 	assert.deepEqual(pause.contents(), ['Playback paused.']);
 	assert.deepEqual(pauseAgain.contents(), ['Playback is already paused.']);
@@ -192,18 +220,24 @@ test('pause and resume commands report success and invalid states', async () => 
 
 test('skip and disconnect commands mutate playback state', async () => {
 	const skipped = await playingService();
-	const skip = interaction();
-	await skipCommand.execute(skip.value as never, { music: skipped.music });
+	const skip = message();
+	await skipCommand.execute(
+		skip.value as never,
+		[],
+		commandContext(skipped.music),
+	);
 
 	assert.deepEqual(skip.contents(), ['Skipped the current track.']);
 	assert.equal(skipped.audio.stopCount, 1);
 	assert.equal(skipped.music.getQueue('guild-1')?.current, null);
 
 	const disconnected = await playingService();
-	const disconnect = interaction();
-	await disconnectCommand.execute(disconnect.value as never, {
-		music: disconnected.music,
-	});
+	const disconnect = message();
+	await disconnectCommand.execute(
+		disconnect.value as never,
+		[],
+		commandContext(disconnected.music),
+	);
 
 	assert.deepEqual(disconnect.contents(), [
 		'Disconnected and cleared the queue.',
@@ -212,7 +246,7 @@ test('skip and disconnect commands mutate playback state', async () => {
 	assert.equal(disconnected.music.getGuildPlayer('guild-1'), null);
 });
 
-test('/queue is read-only and displays current and upcoming requesters', async () => {
+test('e!queue is read-only and displays current and upcoming requesters', async () => {
 	const { music } = await playingService();
 	await music.play({
 		guildId: 'guild-1',
@@ -222,20 +256,27 @@ test('/queue is read-only and displays current and upcoming requesters', async (
 		urlKind: 'video',
 		requestedBy: 'user-2',
 	});
-	const target = interaction({ voiceChannelId: null });
+	const target = message({ voiceChannelId: null });
 
-	await queueCommand.execute(target.value as never, { music });
+	await queueCommand.execute(
+		target.value as never,
+		[],
+		commandContext(music),
+	);
 
 	assert.deepEqual(target.contents(), [
 		'**Now playing**\n[Track title](https://www.youtube.com/watch?v=track) — requested by <@user-1>\n\n**Up next**\n1. [Track title](https://www.youtube.com/watch?v=track) — requested by <@user-2>',
 	]);
 });
 
-test('/queue reports empty state and truncates oversized queues', async () => {
-	const emptyTarget = interaction();
-	await queueCommand.execute(emptyTarget.value as never, {
-		music: new MusicService(new ControlAudioAdapter()),
-	});
+test('e!queue reports empty state and truncates oversized queues', async () => {
+	const emptyTarget = message();
+	const emptyMusic = new MusicService(new ControlAudioAdapter());
+	await queueCommand.execute(
+		emptyTarget.value as never,
+		[],
+		commandContext(emptyMusic),
+	);
 	assert.deepEqual(emptyTarget.contents(), ['The queue is empty.']);
 
 	const tracks = Array.from({ length: 50 }, (_, index) =>

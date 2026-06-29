@@ -7,8 +7,6 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 export interface DiscordConfig {
 	discordToken: string;
-	clientId: string;
-	testServerId: string;
 }
 
 export interface LavalinkConfig {
@@ -97,20 +95,16 @@ function optionalPositiveInteger(
 	return parsed;
 }
 
-export function loadDeployConfig(
-	environment: Environment = env,
-): DiscordConfig {
+function loadDiscordConfig(environment: Environment): DiscordConfig {
 	return Object.freeze({
 		discordToken: requireString(environment, 'DISCORD_TOKEN'),
-		clientId: requireString(environment, 'CLIENT_ID'),
-		testServerId: requireString(environment, 'TEST_SERVER_ID'),
 	});
 }
 
 export function loadRuntimeConfig(
 	environment: Environment = env,
 ): RuntimeConfig {
-	const discord = loadDeployConfig(environment);
+	const discord = loadDiscordConfig(environment);
 
 	return Object.freeze({
 		...discord,

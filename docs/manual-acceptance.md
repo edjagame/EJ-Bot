@@ -23,17 +23,17 @@ tokens, passwords, or complete environment files in the evidence column.
 
 | # | Scenario and actions | Expected result | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| 1 | Run `npm run deploy` and inspect the test guild. | `/play`, `/skip`, `/pause`, `/resume`, `/queue`, and `/disconnect` are registered. | | |
-| 2 | Join a voice channel and run `/play` with a public video URL. | The bot joins the requester's channel, replies with the playing track, and audible playback begins. | | |
-| 3 | While the first track plays, queue another video and then a playlist. Wait for advancement. | `/queue` preserves request order; each track starts exactly once and playback advances automatically. | | |
-| 4 | Pause, resume, skip, inspect `/queue`, and disconnect. | Pause stops audible playback, resume continues it, skip advances once, queue output matches state, and disconnect clears the queue and leaves voice. | | |
+| 1 | Run `e!help`, then run `e!help play`. | Help lists every command with usage and descriptions; command-specific help shows `e!play <YouTube URL>` and marks it server-only. | | |
+| 2 | Join a voice channel and run `e!play` with a public video URL. | The bot joins the requester's channel, replies with the playing track, and audible playback begins. | | |
+| 3 | While the first track plays, queue another video and then a playlist. Wait for advancement. | `e!queue` preserves request order; each track starts exactly once and playback advances automatically. | | |
+| 4 | Pause, resume, skip, inspect `e!queue`, and disconnect. | Pause stops audible playback, resume continues it, skip advances once, queue output matches state, and disconnect clears the queue and leaves voice. | | |
 | 5 | Invoke controls while outside voice, then from a different voice channel. | The bot returns the specified same-channel errors and playback state does not change. | | |
-| 6 | Try plain text or a malformed link, an unavailable video, a playlist with no playable entries, and `/queue` with no tracks. | Each case returns its defined user-facing error without an uncaught exception. | | |
-| 7 | Remove the bot's View Channel, Connect, or Speak permission and invoke `/play`. Restore permissions afterward. | The permission error is returned and no player or queue remains. | | |
+| 6 | Try a missing URL, a malformed link, an unavailable video, a playlist with no playable entries, and `e!queue` with no tracks. | Each case returns its defined user-facing error without an uncaught exception. | | |
+| 7 | Remove the bot's View Channel, Connect, or Speak permission and invoke `e!play`. Restore permissions afterward. | The permission error is returned and no player or queue remains. | | |
 | 8 | Stop Lavalink and invoke a music command, then restart Lavalink. | The command returns the audio-service-unavailable response within the bounded timeout; the bot remains online and utility commands still work. | | |
-| 9 | Force-disconnect or move the bot while music is active. | Guild music state is cleared and the next `/play` creates a fresh player. | | |
+| 9 | Force-disconnect or move the bot while music is active. | Guild music state is cleared and the next `e!play` creates a fresh player. | | |
 | 10 | Leave the bot alone in voice, rejoin before the grace period expires, then leave again. | Rejoining cancels cleanup; the second departure disconnects the bot after the grace period with no stale timer or player. | | |
-| 11 | Queue multiple tracks, restart the bot, and inspect `/queue`. | Shutdown is graceful and the old in-memory queue is gone after restart. | | |
+| 11 | Queue multiple tracks, restart the bot, and inspect `e!queue`. | Shutdown is graceful and the old in-memory queue is gone after restart. | | |
 
 ## Failure record
 

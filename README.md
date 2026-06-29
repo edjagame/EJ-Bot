@@ -2,7 +2,8 @@
 
 EJ Bot is a TypeScript Discord bot built with `discord.js`. Its music
 commands play YouTube video and playlist URLs through a separately operated
-Lavalink v4 node.
+Lavalink v4 node. Commands use the `e!` prefix; run `e!help` for the complete
+command list.
 
 Operators are responsible for complying with YouTube's terms and for ensuring
 that they have the right to play requested content.
@@ -25,8 +26,6 @@ Copy `.env.example` to `.env` and replace every runtime placeholder:
 
 ```dotenv
 DISCORD_TOKEN=bot_token
-CLIENT_ID=application_id
-TEST_SERVER_ID=test_server_id
 LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
 LAVALINK_PASSWORD=replace_with_a_strong_unique_password
@@ -38,6 +37,11 @@ The bot validates configuration at startup. `LAVALINK_PORT` must be an
 integer from `1` through `65535`, `LAVALINK_SECURE` must be exactly `true` or
 `false`, and the empty-channel grace period must be a positive integer in
 milliseconds.
+
+In the Discord Developer Portal, open the application's **Bot** settings and
+enable the privileged **Message Content Intent**. Prefix commands cannot be
+read without it. Invite the bot with permissions to view channels, send
+messages, read message history, connect, and speak.
 
 The project `.env` file is ignored by Git. Do not commit it, paste it into
 logs, bake it into an image, or reuse either service password elsewhere. On a
@@ -73,18 +77,7 @@ The response should identify Lavalink `4.2.2` and the YouTube plugin
 `1.18.1`. A `401` response means the password is wrong. A connection failure
 means the node is not listening at the configured address.
 
-Deploy commands to the configured test guild:
-
-```sh
-npm run deploy
-```
-
-Guild deployment is intentionally the default because changes become
-available quickly during development. Production promotion must be a separate
-reviewed operation using `Routes.applicationCommands(CLIENT_ID)`; do not
-change the default script to deploy globally.
-
-Start the bot after the Lavalink health check and command deployment:
+Start the bot after the Lavalink health check:
 
 ```sh
 npm run dev
@@ -181,9 +174,9 @@ unavoidable:
    the endpoint is unreachable from an unauthorized network.
 
 Use the same startup order in hosted environments: start Lavalink, verify its
-authenticated health endpoint and plugin versions, deploy Discord commands,
-then start the bot. Configure both processes under a supervisor with restart
-policies and retain sanitized logs for incident diagnosis.
+authenticated health endpoint and plugin versions, then start the bot.
+Configure both processes under a supervisor with restart policies and retain
+sanitized logs for incident diagnosis.
 
 ## DigitalOcean Droplet deployment
 

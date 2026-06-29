@@ -71,8 +71,6 @@ Use the generated value as `LAVALINK_PASSWORD`, then set:
 
 ```dotenv
 DISCORD_TOKEN=replace_with_the_discord_bot_token
-CLIENT_ID=replace_with_the_discord_application_id
-TEST_SERVER_ID=replace_with_the_target_guild_id
 LAVALINK_PASSWORD=replace_with_the_generated_password
 MUSIC_EMPTY_CHANNEL_GRACE_MS=30000
 ```
@@ -82,7 +80,11 @@ The Compose stack supplies `LAVALINK_HOST`, `LAVALINK_PORT`, and
 bot container. Keep `.env` out of Git and rotate both credentials if it is
 ever exposed.
 
-## 4. Build, register commands, and start
+Before starting the bot, enable **Message Content Intent** on the
+application's Bot page in the Discord Developer Portal. The bot cannot read
+`e!` commands without this privileged intent.
+
+## 4. Build and start
 
 Validate and build the stack:
 
@@ -90,17 +92,6 @@ Validate and build the stack:
 sudo docker compose config --quiet
 sudo docker compose build --pull
 ```
-
-Register commands in `TEST_SERVER_ID`:
-
-```sh
-sudo docker compose run --rm --no-deps bot node dist/deploy-commands.js
-```
-
-This repository deliberately registers guild commands, which appear quickly
-and limit the bot to the configured guild. Do not treat `TEST_SERVER_ID` as a
-secret. A bot intended for multiple guilds needs a separately reviewed global
-command-registration path before deployment.
 
 Start and inspect the services:
 
@@ -128,7 +119,6 @@ Deploy an update:
 cd /opt/ej-bot
 git pull --ff-only
 sudo docker compose build --pull
-sudo docker compose run --rm --no-deps bot node dist/deploy-commands.js
 sudo docker compose up -d --remove-orphans
 sudo docker compose ps
 ```

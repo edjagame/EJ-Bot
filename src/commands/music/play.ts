@@ -1,9 +1,10 @@
 import {
-	MessageFlags,
 	PermissionFlagsBits,
-	SlashCommandBuilder,
 } from 'discord.js';
-import type { Command } from '../../command.js';
+import {
+	COMMAND_PREFIX,
+	type Command,
+} from '../../command.js';
 import {
 	PlaylistEmptyError,
 	VideoUnavailableError,
@@ -55,61 +56,54 @@ function formatSuccess(result: PlayResult): string {
 }
 
 const command: Command = {
-	data: new SlashCommandBuilder()
-		.setName('play')
-		.setDescription('Plays a YouTube video or playlist URL.')
-		.setDMPermission(false)
-		.addStringOption((option) =>
-			option
-				.setName('url')
-				.setDescription('A YouTube video or playlist URL.')
-				.setRequired(true),
-		),
-	async execute(interaction, { music }): Promise<void> {
-		if (!interaction.inCachedGuild()) {
-			await interaction.reply({
+	name: 'play',
+	description: 'Plays a YouTube video or playlist URL.',
+	usage: 'play <YouTube URL>',
+	guildOnly: true,
+	async execute(message, args, { music }): Promise<void> {
+		if (!message.inGuild()) {
+			await message.reply({
 				content: 'This command can only be used in a server.',
-				flags: MessageFlags.Ephemeral,
+				allowedMentions: { repliedUser: false },
 			});
 			return;
 		}
 
-		const parsedUrl = parseYouTubeUrl(
-			interaction.options.getString('url', true),
-		);
+		const parsedUrl =
+			args.length === 1 ? parseYouTubeUrl(args[0]!) : null;
 
 		if (!parsedUrl) {
-			await interaction.reply({
+			await message.reply({
 				content: 'Provide a valid YouTube video or playlist URL.',
-				flags: MessageFlags.Ephemeral,
+				allowedMentions: { repliedUser: false },
 			});
 			return;
 		}
 
-		const voiceChannel = interaction.member.voice.channel;
+		const voiceChannel = message.member?.voice.channel;
 
 		if (!voiceChannel) {
-			await interaction.reply({
-				content: 'Join a voice channel before using /play.',
-				flags: MessageFlags.Ephemeral,
+			await message.reply({
+				content: `Join a voice channel before using ${COMMAND_PREFIX}play.`,
+				allowedMentions: { repliedUser: false },
 			});
 			return;
 		}
 
-		const existingPlayer = music.getGuildPlayer(interaction.guildId);
+		const existingPlayer = music.getGuildPlayer(message.guildId);
 
 		if (
 			existingPlayer &&
 			existingPlayer.voiceChannelId !== voiceChannel.id
 		) {
-			await interaction.reply({
+			await message.reply({
 				content: 'You must be in my voice channel to use this command.',
-				flags: MessageFlags.Ephemeral,
+				allowedMentions: { repliedUser: false },
 			});
 			return;
 		}
 
-		const botMember = interaction.guild.members.me;
+		const botMember = message.guild.members.me;
 		const permissions = botMember
 			? voiceChannel.permissionsFor(botMember)
 			: null;
@@ -121,47 +115,52 @@ const command: Command = {
 				PermissionFlagsBits.Speak,
 			])
 		) {
-			await interaction.reply({
+			await message.reply({
 				content:
 					'I need permission to view, connect to, and speak in that voice channel.',
-				flags: MessageFlags.Ephemeral,
+				allowedMentions: { repliedUser: false },
 			});
 			return;
 		}
 
 		music.assertAvailable();
-		await interaction.deferReply();
 
 		try {
 			const result = await music.play({
-				guildId: interaction.guildId,
+				guildId: message.guildId,
 				voiceChannelId: voiceChannel.id,
-				textChannelId: interaction.channelId,
+				textChannelId: message.channelId,
 				url: parsedUrl.url,
 				urlKind: parsedUrl.kind,
-				requestedBy: interaction.user.id,
+				requestedBy: message.author.id,
 			});
 
-			await interaction.editReply(formatSuccess(result));
+			await message.reply({
+				content: formatSuccess(result),
+				allowedMentions: { repliedUser: false },
+			});
 		} catch (error) {
 			if (error instanceof VoiceChannelMismatchError) {
-				await interaction.editReply(
-					'You must be in my voice channel to use this command.',
-				);
+				await message.reply({
+					content: 'You must be in my voice channel to use this command.',
+					allowedMentions: { repliedUser: false },
+				});
 				return;
 			}
 
 			if (error instanceof PlaylistEmptyError) {
-				await interaction.editReply(
-					'That playlist has no playable videos.',
-				);
+				await message.reply({
+					content: 'That playlist has no playable videos.',
+					allowedMentions: { repliedUser: false },
+				});
 				return;
 			}
 
 			if (error instanceof VideoUnavailableError) {
-				await interaction.editReply(
-					'That video is unavailable or cannot be played.',
-				);
+				await message.reply({
+					content: 'That video is unavailable or cannot be played.',
+					allowedMentions: { repliedUser: false },
+				});
 				return;
 			}
 

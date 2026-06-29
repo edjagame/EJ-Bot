@@ -1,18 +1,17 @@
-import { SlashCommandBuilder } from 'discord.js';
 import type { Command } from '../../command.js';
 import {
 	controlErrorMessage,
-	replyEphemeral,
+	replyToMessage,
 	requireControlContext,
 } from '../../music/music-command-helpers.js';
 
 const command: Command = {
-	data: new SlashCommandBuilder()
-		.setName('skip')
-		.setDescription('Skips the current track.')
-		.setDMPermission(false),
-	async execute(interaction, { music }): Promise<void> {
-		const context = await requireControlContext(interaction, music);
+	name: 'skip',
+	description: 'Skips the current track.',
+	usage: 'skip',
+	guildOnly: true,
+	async execute(message, _args, { music }): Promise<void> {
+		const context = await requireControlContext(message, music);
 
 		if (!context) {
 			return;
@@ -20,15 +19,15 @@ const command: Command = {
 
 		try {
 			await music.skip(context.guildId);
-			await interaction.reply('Skipped the current track.');
+			await message.reply('Skipped the current track.');
 		} catch (error) {
-			const message = controlErrorMessage(error);
+			const errorMessage = controlErrorMessage(error);
 
-			if (!message) {
+			if (!errorMessage) {
 				throw error;
 			}
 
-			await replyEphemeral(interaction, message);
+			await replyToMessage(message, errorMessage);
 		}
 	},
 };

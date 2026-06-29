@@ -73,6 +73,9 @@ Use the generated value as `LAVALINK_PASSWORD`, then set:
 DISCORD_TOKEN=replace_with_the_discord_bot_token
 LAVALINK_PASSWORD=replace_with_the_generated_password
 MUSIC_EMPTY_CHANNEL_GRACE_MS=30000
+YOUTUBE_OAUTH_ENABLED=false
+YOUTUBE_OAUTH_REFRESH_TOKEN=
+YOUTUBE_OAUTH_SKIP_INITIALIZATION=false
 ```
 
 The Compose stack supplies `LAVALINK_HOST`, `LAVALINK_PORT`, and
@@ -110,6 +113,63 @@ Expected state:
 Complete the
 [manual Discord acceptance checklist](manual-acceptance.md) against the
 deployed commit.
+
+## YouTube playback from a Droplet
+
+YouTube may reject anonymous playback from a datacenter IP even when the same
+video works from a residential local connection. Confirm that this is the
+failure before enabling authentication:
+
+```sh
+sudo docker compose logs --since 15m lavalink \
+  | grep -Ei 'confirm|login|required|403|all clients|youtube'
+```
+
+Messages such as `Sign in to confirm you're not a bot`, `This video requires
+login`, or all YouTube clients failing with HTTP 403 indicate this class of
+failure. Other errors need to be diagnosed from the complete Lavalink and bot
+logs instead.
+
+The YouTube plugin supports
+[OAuth as a mitigation](https://github.com/lavalink-devs/youtube-source#using-oauth-tokens),
+but its maintainers warn that it can trigger rate limits or account
+termination. Use a dedicated account, never a personal YouTube account. OAuth
+is not guaranteed to repair a blocked IP.
+
+To perform the one-time device authorization, set these values in `.env`:
+
+```dotenv
+YOUTUBE_OAUTH_ENABLED=true
+YOUTUBE_OAUTH_REFRESH_TOKEN=
+YOUTUBE_OAUTH_SKIP_INITIALIZATION=false
+```
+
+Recreate Lavalink and follow its logs:
+
+```sh
+sudo docker compose up -d --force-recreate lavalink
+sudo docker compose logs -f lavalink
+```
+
+Open the device-authorization URL shown in the log, enter its code, and
+authorize the dedicated account. Lavalink then logs a refresh token. Put that
+token in `.env`, set initialization to be skipped, and recreate the service:
+
+```dotenv
+YOUTUBE_OAUTH_ENABLED=true
+YOUTUBE_OAUTH_REFRESH_TOKEN=replace_with_the_generated_refresh_token
+YOUTUBE_OAUTH_SKIP_INITIALIZATION=true
+```
+
+```sh
+chmod 600 .env
+sudo docker compose up -d --force-recreate lavalink
+sudo docker compose ps
+```
+
+The second recreation removes the bootstrap container whose logs contained
+the refresh token. Do not paste the token into Git, issue reports, or chat.
+If OAuth is not required, leave it disabled.
 
 ## Operations
 

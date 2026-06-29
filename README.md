@@ -53,7 +53,9 @@ Discord token or Lavalink password immediately if either is exposed.
 
 The supplied Compose deployment runs Lavalink `4.2.2` with `youtube-source`
 `1.18.1`. Built-in YouTube support, search, bare IDs, OAuth, and
-proof-of-origin tokens are disabled.
+proof-of-origin tokens are disabled by default. The `TV` client is configured
+as the final playback fallback so operators can opt in to OAuth without
+changing the tracked Lavalink configuration.
 
 Start and verify Lavalink before starting the Discord bot:
 

@@ -24,3 +24,13 @@ plugins:
     allowSearch: false
     allowDirectVideoIds: false
     allowDirectPlaylistIds: false
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+      - TV
+    oauth:
+      enabled: "${YOUTUBE_OAUTH_ENABLED:false}"
+      refreshToken: "${YOUTUBE_OAUTH_REFRESH_TOKEN:}"
+      skipInitialization: "${YOUTUBE_OAUTH_SKIP_INITIALIZATION:false}"

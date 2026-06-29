@@ -21,6 +21,9 @@ services:
         condition: service_completed_successfully
     environment:
       LAVALINK_PASSWORD: "${LAVALINK_PASSWORD:?Set LAVALINK_PASSWORD in the project .env file}"
+      YOUTUBE_OAUTH_ENABLED: "${YOUTUBE_OAUTH_ENABLED:-false}"
+      YOUTUBE_OAUTH_REFRESH_TOKEN: "${YOUTUBE_OAUTH_REFRESH_TOKEN:-}"
+      YOUTUBE_OAUTH_SKIP_INITIALIZATION: "${YOUTUBE_OAUTH_SKIP_INITIALIZATION:-false}"
     ports:
       - "127.0.0.1:2333:2333"
     volumes:

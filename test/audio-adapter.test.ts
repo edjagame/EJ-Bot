@@ -44,18 +44,34 @@ test('maps playlist metadata and counts omitted or invalid entries', () => {
 	});
 });
 
-test('maps unexpected search results to an error result', () => {
+test('preserves search results when Lavalink returns tracks', () => {
 	const result = {
 		loadType: 'search',
 		exception: null,
 		pluginInfo: {},
 		playlist: null,
-		tracks: [],
+		tracks: [
+			{
+				encoded: 'encoded-search',
+				info: {
+					title: 'Search match',
+					uri: 'https://www.youtube.com/watch?v=search',
+					duration: 45_000,
+				},
+			},
+		],
 	} as unknown as SearchResult;
 
 	assert.deepEqual(mapLavalinkLoadResult(result), {
-		loadType: 'error',
-		tracks: [],
+		loadType: 'search',
+		tracks: [
+			{
+				encoded: 'encoded-search',
+				title: 'Search match',
+				url: 'https://www.youtube.com/watch?v=search',
+				durationMs: 45_000,
+			},
+		],
 		skippedCount: 0,
 	});
 });

@@ -6,6 +6,7 @@ import {
 } from 'discord.js';
 import { loadRuntimeConfig } from './config.js';
 import { loadCommands } from './load-commands.js';
+import { MessageCommandDeduper } from './message-command-deduper.js';
 import { handleMessageCommand } from './message-command-handler.js';
 import { LavalinkAudioAdapter } from './music/audio-adapter.js';
 import { MusicService } from './music/music-service.js';
@@ -46,6 +47,7 @@ const music = new MusicService(audio, {
 	},
 });
 const commandContext: CommandContext = { music, commands };
+const messageCommandDeduper = new MessageCommandDeduper();
 let isShuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
 
@@ -123,6 +125,10 @@ client.on(Events.VoiceStateUpdate, (_oldState, newState) => {
 });
 
 client.on(Events.MessageCreate, (message) => {
+	if (!messageCommandDeduper.claim(message.id)) {
+		return;
+	}
+
 	void handleMessageCommand(message, commandContext, { isShuttingDown });
 });
 

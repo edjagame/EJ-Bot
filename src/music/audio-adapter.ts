@@ -61,7 +61,7 @@ export interface AudioEventHandlers {
 }
 
 export interface AudioLoadResult {
-	readonly loadType: 'track' | 'playlist' | 'empty' | 'error';
+	readonly loadType: 'track' | 'playlist' | 'search' | 'empty' | 'error';
 	readonly tracks: readonly AudioTrack[];
 	readonly skippedCount: number;
 	readonly playlistName?: string;
@@ -123,6 +123,7 @@ export function mapLavalinkLoadResult(
 	const loadType =
 		result.loadType === 'track' ||
 		result.loadType === 'playlist' ||
+		result.loadType === 'search' ||
 		result.loadType === 'empty'
 			? result.loadType
 			: 'error';

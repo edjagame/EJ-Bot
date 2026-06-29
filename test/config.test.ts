@@ -23,6 +23,9 @@ test('loads and converts a valid runtime configuration', () => {
 			password: 'lavalink-secret',
 			secure: false,
 		},
+		music: {
+			emptyChannelGraceMs: 30_000,
+		},
 	});
 });
 
@@ -91,6 +94,28 @@ for (const secure of ['TRUE', 'yes', '0']) {
 					LAVALINK_SECURE: secure,
 				}),
 			/LAVALINK_SECURE must be either true or false/,
+		);
+	});
+}
+
+test('accepts an explicit empty-channel grace period', () => {
+	const result = loadRuntimeConfig({
+		...validEnvironment,
+		MUSIC_EMPTY_CHANNEL_GRACE_MS: '45000',
+	});
+
+	assert.equal(result.music.emptyChannelGraceMs, 45_000);
+});
+
+for (const grace of ['0', '-1', '1.5', 'not-a-number']) {
+	test(`rejects invalid empty-channel grace period ${grace}`, () => {
+		assert.throws(
+			() =>
+				loadRuntimeConfig({
+					...validEnvironment,
+					MUSIC_EMPTY_CHANNEL_GRACE_MS: grace,
+				}),
+			/MUSIC_EMPTY_CHANNEL_GRACE_MS must be a positive integer/,
 		);
 	});
 }

@@ -47,8 +47,17 @@ export interface AudioTrackTerminalEvent {
 	readonly kind: 'finished' | 'failed' | 'stuck';
 }
 
+export interface AudioPlayerInvalidatedEvent {
+	readonly guildId: string;
+	readonly kind: 'disconnected' | 'moved' | 'destroyed';
+}
+
 export interface AudioEventHandlers {
 	onTrackTerminal(event: AudioTrackTerminalEvent): void | Promise<void>;
+	onPlayerInvalidated(
+		event: AudioPlayerInvalidatedEvent,
+	): void | Promise<void>;
+	onNodeUnavailable(): void | Promise<void>;
 }
 
 export interface AudioLoadResult {
@@ -75,6 +84,7 @@ export interface AudioAdapter {
 	pause(guildId: string): Promise<void>;
 	resume(guildId: string): Promise<void>;
 	destroyPlayer(guildId: string): Promise<void>;
+	shutdown(): Promise<void>;
 }
 
 export function mapLavalinkLoadResult(
@@ -147,6 +157,9 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 	readonly #manager: LavalinkManager;
 	#initialization: Promise<boolean> | null = null;
 	#eventHandlers: AudioEventHandlers | null = null;
+	#shutdownPromise: Promise<void> | null = null;
+	#isShuttingDown = false;
+	readonly #destroyingPlayers = new Set<string>();
 
 	constructor(client: Client, config: LavalinkConfig) {
 		this.#manager = new LavalinkManager({
@@ -194,6 +207,10 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 	}
 
 	initialize(client: AudioClientIdentity): Promise<boolean> {
+		if (this.#isShuttingDown) {
+			return Promise.resolve(false);
+		}
+
 		this.#initialization ??= this.#initialize(client);
 		return this.#initialization;
 	}
@@ -278,8 +295,36 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 		const player = this.#manager.getPlayer(guildId);
 
 		if (player) {
-			await player.destroy('music-service-cleanup', true);
+			this.#destroyingPlayers.add(guildId);
+
+			try {
+				await player.destroy('music-service-cleanup', true);
+			} finally {
+				this.#destroyingPlayers.delete(guildId);
+			}
 		}
+	}
+
+	shutdown(): Promise<void> {
+		this.#shutdownPromise ??= this.#shutdown();
+		return this.#shutdownPromise;
+	}
+
+	async #shutdown(): Promise<void> {
+		this.#isShuttingDown = true;
+
+		if (this.#initialization) {
+			try {
+				await this.#initialization;
+			} catch (error) {
+				console.error('Lavalink initialization failed during shutdown.', {
+					event: 'node-shutdown-initialization',
+					error,
+				});
+			}
+		}
+
+		await this.#manager.nodeManager.disconnectAll(true, true);
 	}
 
 	async #initialize(client: AudioClientIdentity): Promise<boolean> {
@@ -376,6 +421,10 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 				...nodeContext(node),
 				reason,
 			});
+
+			if (!this.#isShuttingDown) {
+				this.#emitNodeUnavailable();
+			}
 		});
 
 		nodes.on('error', (node, error, payload) => {
@@ -393,7 +442,54 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 				...playerContext(player),
 				reason,
 			});
+
+			if (
+				!this.#isShuttingDown &&
+				!this.#destroyingPlayers.has(player.guildId)
+			) {
+				this.#emitPlayerInvalidated({
+					guildId: player.guildId,
+					kind: 'destroyed',
+				});
+			}
 		});
+
+		this.#manager.on('playerDisconnect', (player, voiceChannelId) => {
+			console.warn('Lavalink player was disconnected from voice.', {
+				event: 'player-disconnect',
+				...playerContext(player),
+				voiceChannelId,
+			});
+
+			if (
+				!this.#isShuttingDown &&
+				!this.#destroyingPlayers.has(player.guildId)
+			) {
+				this.#emitPlayerInvalidated({
+					guildId: player.guildId,
+					kind: 'disconnected',
+				});
+			}
+		});
+
+		this.#manager.on(
+			'playerMove',
+			(player, oldVoiceChannelId, newVoiceChannelId) => {
+				console.warn('Lavalink player was moved unexpectedly.', {
+					event: 'player-move',
+					...playerContext(player),
+					oldVoiceChannelId,
+					newVoiceChannelId,
+				});
+
+				if (!this.#isShuttingDown) {
+					this.#emitPlayerInvalidated({
+						guildId: player.guildId,
+						kind: 'moved',
+					});
+				}
+			},
+		);
 
 		this.#manager.on('trackEnd', (player, track, payload) => {
 			console.log('Lavalink track ended.', {
@@ -476,6 +572,30 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 					guildId,
 					trackId,
 					kind,
+					error,
+				});
+			},
+		);
+	}
+
+	#emitPlayerInvalidated(event: AudioPlayerInvalidatedEvent): void {
+		Promise.resolve(this.#eventHandlers?.onPlayerInvalidated(event)).catch(
+			(error: unknown) => {
+				console.error('Failed to handle a Lavalink player invalidation.', {
+					event: 'player-invalidation-handler',
+					guildId: event.guildId,
+					kind: event.kind,
+					error,
+				});
+			},
+		);
+	}
+
+	#emitNodeUnavailable(): void {
+		Promise.resolve(this.#eventHandlers?.onNodeUnavailable()).catch(
+			(error: unknown) => {
+				console.error('Failed to handle an unavailable Lavalink node.', {
+					event: 'node-unavailable-handler',
 					error,
 				});
 			},

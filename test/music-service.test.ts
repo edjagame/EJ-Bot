@@ -13,6 +13,7 @@ import {
 	AudioServiceUnavailableError,
 	DuplicateTrackIdError,
 	MusicService,
+	MusicServiceShuttingDownError,
 	NoCurrentTrackError,
 	PlaybackAlreadyPausedError,
 	PlaybackNotPausedError,
@@ -20,6 +21,12 @@ import {
 	VoiceChannelMismatchError,
 	type MusicTrack,
 } from '../src/music/music-service.js';
+
+function delay(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, milliseconds);
+	});
+}
 
 class FakeAudioAdapter implements AudioAdapter {
 	isAvailable = true;
@@ -42,9 +49,11 @@ class FakeAudioAdapter implements AudioAdapter {
 	readonly destroyedGuilds: string[] = [];
 	connectError: Error | null = null;
 	playError: Error | null = null;
+	destroyError: Error | null = null;
 	readonly stoppedGuilds: string[] = [];
 	readonly pausedGuilds: string[] = [];
 	readonly resumedGuilds: string[] = [];
+	shutdownCalls = 0;
 
 	setEventHandlers(handlers: AudioEventHandlers): void {
 		this.eventHandlers = handlers;
@@ -105,6 +114,25 @@ class FakeAudioAdapter implements AudioAdapter {
 
 	async destroyPlayer(guildId: string): Promise<void> {
 		this.destroyedGuilds.push(guildId);
+
+		if (this.destroyError) {
+			throw this.destroyError;
+		}
+	}
+
+	async shutdown(): Promise<void> {
+		this.shutdownCalls += 1;
+	}
+
+	async emitPlayerInvalidated(
+		guildId: string,
+		kind: 'disconnected' | 'moved' | 'destroyed',
+	): Promise<void> {
+		await this.eventHandlers?.onPlayerInvalidated({ guildId, kind });
+	}
+
+	async emitNodeUnavailable(): Promise<void> {
+		await this.eventHandlers?.onNodeUnavailable();
 	}
 }
 
@@ -544,4 +572,131 @@ test('disconnect destroys the audio player and clears guild state', async () => 
 
 	assert.equal(music.getGuildPlayer('guild-1'), null);
 	assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
+});
+
+test('cleans up an empty voice channel after the grace period', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio, { emptyChannelGraceMs: 20 });
+	await music.play(playRequest());
+
+	music.updateVoiceChannelOccupancy('guild-1', false);
+	await delay(5);
+	music.updateVoiceChannelOccupancy('guild-1', true);
+	await delay(30);
+
+	assert.notEqual(music.getGuildPlayer('guild-1'), null);
+	assert.deepEqual(audio.destroyedGuilds, []);
+
+	music.updateVoiceChannelOccupancy('guild-1', false);
+	music.updateVoiceChannelOccupancy('guild-1', false);
+	await delay(40);
+
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
+});
+
+test('makes repeated player cleanup idempotent', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+
+	await Promise.all([
+		music.cleanupGuild('guild-1', 'voice-state'),
+		music.cleanupGuild('guild-1', 'player-invalidated'),
+	]);
+	await audio.emitPlayerInvalidated('guild-1', 'destroyed');
+
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
+});
+
+test('clears state even when player destruction fails', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	const underlying = new Error('player destruction failed');
+	audio.destroyError = underlying;
+
+	await assert.rejects(
+		music.disconnect('guild-1'),
+		(error: unknown) =>
+			error instanceof AudioServiceUnavailableError &&
+			error.cause === underlying,
+	);
+
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.equal(
+		await music.cleanupGuild('guild-1', 'player-invalidated'),
+		false,
+	);
+	assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
+});
+
+test('clears affected guilds after player and node invalidation', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	await music.play(
+		playRequest({
+			guildId: 'guild-2',
+			voiceChannelId: 'voice-2',
+			textChannelId: 'text-2',
+		}),
+	);
+
+	await audio.emitPlayerInvalidated('guild-1', 'moved');
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.notEqual(music.getGuildPlayer('guild-2'), null);
+
+	await audio.emitNodeUnavailable();
+	assert.equal(music.getGuildPlayer('guild-2'), null);
+	assert.deepEqual(audio.destroyedGuilds.sort(), ['guild-1', 'guild-2']);
+});
+
+test('destroys stale state when advancing to the next track fails', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio);
+	await music.play(playRequest());
+	await music.play(playRequest());
+	const currentTrackId = music.getQueue('guild-1')?.current?.id;
+	assert(currentTrackId);
+	audio.playError = new Error('node failed while advancing');
+
+	await audio.emitTerminal({
+		guildId: 'guild-1',
+		trackId: currentTrackId,
+		kind: 'failed',
+	});
+
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.deepEqual(audio.destroyedGuilds, ['guild-1']);
+});
+
+test('shuts down all players and the audio adapter exactly once', async () => {
+	const audio = new FakeAudioAdapter();
+	const music = new MusicService(audio, { emptyChannelGraceMs: 10_000 });
+	await music.play(playRequest());
+	await music.play(
+		playRequest({
+			guildId: 'guild-2',
+			voiceChannelId: 'voice-2',
+			textChannelId: 'text-2',
+		}),
+	);
+	music.updateVoiceChannelOccupancy('guild-1', false);
+
+	const firstShutdown = music.shutdown();
+	const secondShutdown = music.shutdown();
+
+	assert.equal(firstShutdown, secondShutdown);
+	await firstShutdown;
+
+	assert.equal(music.getGuildPlayer('guild-1'), null);
+	assert.equal(music.getGuildPlayer('guild-2'), null);
+	assert.deepEqual(audio.destroyedGuilds.sort(), ['guild-1', 'guild-2']);
+	assert.equal(audio.shutdownCalls, 1);
+	await assert.rejects(
+		music.createGuildPlayer('guild-3', 'voice-3'),
+		MusicServiceShuttingDownError,
+	);
 });

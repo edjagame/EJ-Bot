@@ -79,6 +79,8 @@ class ControlAudioAdapter implements AudioAdapter {
 	async destroyPlayer(_guildId: string): Promise<void> {
 		this.destroyCount += 1;
 	}
+
+	async shutdown(): Promise<void> {}
 }
 
 interface InteractionOptions {

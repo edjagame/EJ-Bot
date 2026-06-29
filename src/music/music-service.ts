@@ -37,7 +37,17 @@ export interface MusicServiceOptions {
 	readonly notify?: (
 		notification: TrackFailureNotification,
 	) => void | Promise<void>;
+	readonly emptyChannelGraceMs?: number;
 }
+
+export type GuildCleanupReason =
+	| 'command'
+	| 'empty-channel'
+	| 'voice-state'
+	| 'player-invalidated'
+	| 'node-unavailable'
+	| 'unrecoverable-playback'
+	| 'shutdown';
 
 export class AudioServiceUnavailableError extends Error {
 	constructor(options?: ErrorOptions) {
@@ -109,6 +119,13 @@ export class PlaylistEmptyError extends Error {
 	}
 }
 
+export class MusicServiceShuttingDownError extends Error {
+	constructor() {
+		super('The music service is shutting down.');
+		this.name = 'MusicServiceShuttingDownError';
+	}
+}
+
 function freezeTrack(track: MusicTrack): MusicTrack {
 	return Object.freeze({ ...track });
 }
@@ -132,14 +149,23 @@ function playerSnapshot(player: MutableGuildPlayer): GuildPlayer {
 export class MusicService {
 	readonly #audio: AudioAdapter;
 	readonly #notify: NonNullable<MusicServiceOptions['notify']>;
+	readonly #emptyChannelGraceMs: number;
 	readonly #guilds = new Map<string, MutableGuildPlayer>();
 	readonly #mutationTails = new Map<string, Promise<void>>();
+	readonly #emptyChannelTimers = new Map<string, NodeJS.Timeout>();
+	readonly #voiceChannelOccupied = new Map<string, boolean>();
+	#isShuttingDown = false;
+	#shutdownPromise: Promise<void> | null = null;
 
 	constructor(audio: AudioAdapter, options: MusicServiceOptions = {}) {
 		this.#audio = audio;
 		this.#notify = options.notify ?? (() => undefined);
+		this.#emptyChannelGraceMs = options.emptyChannelGraceMs ?? 30_000;
 		this.#audio.setEventHandlers({
 			onTrackTerminal: (event) => this.#handleTrackTerminal(event),
+			onPlayerInvalidated: (event) =>
+				this.#handlePlayerInvalidated(event.guildId, event.kind),
+			onNodeUnavailable: () => this.#handleNodeUnavailable(),
 		});
 	}
 
@@ -154,10 +180,18 @@ export class MusicService {
 	}
 
 	initialize(client: AudioClientIdentity): Promise<boolean> {
+		if (this.#isShuttingDown) {
+			return Promise.resolve(false);
+		}
+
 		return this.#audio.initialize(client);
 	}
 
 	forwardRawData(data: unknown): Promise<void> {
+		if (this.#isShuttingDown) {
+			return Promise.resolve();
+		}
+
 		return this.#audio.forwardVoicePacket(data);
 	}
 
@@ -454,15 +488,69 @@ export class MusicService {
 	disconnect(guildId: string): Promise<void> {
 		return this.#mutateGuild(guildId, async () => {
 			this.#requireGuild(guildId);
-
-			try {
-				await this.#audio.destroyPlayer(guildId);
-			} catch (error) {
-				throw new AudioServiceUnavailableError({ cause: error });
-			} finally {
-				this.#guilds.delete(guildId);
-			}
+			await this.#cleanupGuildState(guildId, 'command', true);
 		});
+	}
+
+	cleanupGuild(
+		guildId: string,
+		reason: GuildCleanupReason,
+	): Promise<boolean> {
+		return this.#mutateGuild(
+			guildId,
+			() => this.#cleanupGuildState(guildId, reason, false),
+			true,
+		);
+	}
+
+	updateVoiceChannelOccupancy(
+		guildId: string,
+		isOccupied: boolean,
+	): void {
+		if (this.#isShuttingDown || !this.#guilds.has(guildId)) {
+			this.#cancelEmptyChannelTimer(guildId);
+			return;
+		}
+
+		this.#voiceChannelOccupied.set(guildId, isOccupied);
+
+		if (isOccupied) {
+			this.#cancelEmptyChannelTimer(guildId);
+			return;
+		}
+
+		if (this.#emptyChannelTimers.has(guildId)) {
+			return;
+		}
+
+		const timer = setTimeout(() => {
+			this.#emptyChannelTimers.delete(guildId);
+
+			void this.#mutateGuild(
+				guildId,
+				async () => {
+					if (this.#voiceChannelOccupied.get(guildId) !== false) {
+						return;
+					}
+
+					await this.#cleanupGuildState(
+						guildId,
+						'empty-channel',
+						false,
+					);
+				},
+				true,
+			).catch((error: unknown) => {
+				console.error('Failed to clean up an empty voice channel.', {
+					event: 'empty-channel-cleanup',
+					guildId,
+					error,
+				});
+			});
+		}, this.#emptyChannelGraceMs);
+
+		timer.unref();
+		this.#emptyChannelTimers.set(guildId, timer);
 	}
 
 	getQueue(guildId: string): GuildQueue | null {
@@ -476,12 +564,26 @@ export class MusicService {
 	}
 
 	resetGuild(guildId: string): Promise<boolean> {
-		return this.#mutateGuild(guildId, () => this.#guilds.delete(guildId));
+		return this.#mutateGuild(guildId, () => {
+			this.#clearGuildTracking(guildId);
+			return this.#guilds.delete(guildId);
+		});
 	}
 
 	async resetAll(): Promise<void> {
 		await Promise.all(this.#mutationTails.values());
+		this.#cancelAllEmptyChannelTimers();
 		this.#guilds.clear();
+		this.#voiceChannelOccupied.clear();
+	}
+
+	shutdown(): Promise<void> {
+		if (!this.#shutdownPromise) {
+			this.#isShuttingDown = true;
+			this.#shutdownPromise = this.#shutdown();
+		}
+
+		return this.#shutdownPromise;
 	}
 
 	#startNext(player: MutableGuildPlayer): MusicTrack | null {
@@ -494,6 +596,10 @@ export class MusicService {
 	async #handleTrackTerminal(
 		event: AudioTrackTerminalEvent,
 	): Promise<void> {
+		if (this.#isShuttingDown) {
+			return;
+		}
+
 		const notification = await this.#mutateGuild(
 			event.guildId,
 			async (): Promise<TrackFailureNotification | null> => {
@@ -550,6 +656,12 @@ export class MusicService {
 						trackId: next.id,
 						error,
 					});
+
+					await this.#cleanupGuildState(
+						event.guildId,
+						'unrecoverable-playback',
+						false,
+					);
 				}
 
 				return failureNotification;
@@ -567,6 +679,112 @@ export class MusicService {
 					error,
 				});
 			}
+		}
+	}
+
+	async #handlePlayerInvalidated(
+		guildId: string,
+		kind: 'disconnected' | 'moved' | 'destroyed',
+	): Promise<void> {
+		if (this.#isShuttingDown) {
+			return;
+		}
+
+		console.warn('Cleaning up an invalidated music player.', {
+			event: 'player-invalidated',
+			guildId,
+			kind,
+		});
+		await this.cleanupGuild(guildId, 'player-invalidated');
+	}
+
+	async #handleNodeUnavailable(): Promise<void> {
+		if (this.#isShuttingDown) {
+			return;
+		}
+
+		const guildIds = [...this.#guilds.keys()];
+		await Promise.all(
+			guildIds.map((guildId) =>
+				this.cleanupGuild(guildId, 'node-unavailable'),
+			),
+		);
+	}
+
+	async #cleanupGuildState(
+		guildId: string,
+		reason: GuildCleanupReason,
+		propagateError: boolean,
+	): Promise<boolean> {
+		this.#clearGuildTracking(guildId);
+
+		if (!this.#guilds.has(guildId)) {
+			return false;
+		}
+
+		let cleanupError: unknown;
+
+		try {
+			await this.#audio.destroyPlayer(guildId);
+		} catch (error) {
+			cleanupError = error;
+			console.error('Failed to destroy a music player during cleanup.', {
+				event: 'guild-cleanup',
+				guildId,
+				reason,
+				error,
+			});
+		} finally {
+			this.#guilds.delete(guildId);
+		}
+
+		if (cleanupError && propagateError) {
+			throw new AudioServiceUnavailableError({ cause: cleanupError });
+		}
+
+		return true;
+	}
+
+	#clearGuildTracking(guildId: string): void {
+		this.#cancelEmptyChannelTimer(guildId);
+		this.#voiceChannelOccupied.delete(guildId);
+	}
+
+	#cancelEmptyChannelTimer(guildId: string): void {
+		const timer = this.#emptyChannelTimers.get(guildId);
+
+		if (timer) {
+			clearTimeout(timer);
+			this.#emptyChannelTimers.delete(guildId);
+		}
+	}
+
+	#cancelAllEmptyChannelTimers(): void {
+		for (const timer of this.#emptyChannelTimers.values()) {
+			clearTimeout(timer);
+		}
+
+		this.#emptyChannelTimers.clear();
+	}
+
+	async #shutdown(): Promise<void> {
+		this.#cancelAllEmptyChannelTimers();
+		this.#voiceChannelOccupied.clear();
+
+		await Promise.all([...this.#mutationTails.values()]);
+
+		const guildIds = [...this.#guilds.keys()];
+		await Promise.all(
+			guildIds.map((guildId) =>
+				this.cleanupGuild(guildId, 'shutdown'),
+			),
+		);
+
+		try {
+			await this.#audio.shutdown();
+		} finally {
+			this.#guilds.clear();
+			this.#mutationTails.clear();
 		}
 	}
 
@@ -591,7 +809,12 @@ export class MusicService {
 	#mutateGuild<Result>(
 		guildId: string,
 		operation: () => Result | Promise<Result>,
+		allowDuringShutdown = false,
 	): Promise<Result> {
+		if (this.#isShuttingDown && !allowDuringShutdown) {
+			return Promise.reject(new MusicServiceShuttingDownError());
+		}
+
 		const previous = this.#mutationTails.get(guildId) ?? Promise.resolve();
 		const result = previous.then(operation);
 		const tail = result.then(

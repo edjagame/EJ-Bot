@@ -58,6 +58,8 @@ class CommandAudioAdapter implements AudioAdapter {
 	async resume(_guildId: string): Promise<void> {}
 
 	async destroyPlayer(_guildId: string): Promise<void> {}
+
+	async shutdown(): Promise<void> {}
 }
 
 interface InteractionOptions {

@@ -11,6 +11,7 @@ import {
 	AudioServiceUnavailableError,
 	MusicService,
 } from './music/music-service.js';
+import { handleVoiceStateCleanup } from './music/voice-state-cleanup.js';
 import type { CommandContext } from './command.js';
 import type { InteractionReplyOptions } from 'discord.js';
 
@@ -24,6 +25,7 @@ const client = new Client({
 });
 const audio = new LavalinkAudioAdapter(client, runtimeConfig.lavalink);
 const music = new MusicService(audio, {
+	emptyChannelGraceMs: runtimeConfig.music.emptyChannelGraceMs,
 	notify: async ({ textChannelId, content }) => {
 		const channel = await client.channels.fetch(textChannelId);
 
@@ -43,6 +45,45 @@ const music = new MusicService(audio, {
 	},
 });
 const commandContext: CommandContext = { music };
+let isShuttingDown = false;
+let shutdownPromise: Promise<void> | null = null;
+
+function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+	if (shutdownPromise) {
+		return shutdownPromise;
+	}
+
+	isShuttingDown = true;
+	console.log('Graceful shutdown started.', {
+		event: 'process-shutdown',
+		signal,
+	});
+
+	shutdownPromise = (async () => {
+		try {
+			await music.shutdown();
+		} catch (error) {
+			process.exitCode = 1;
+			console.error('Graceful shutdown encountered an error.', {
+				event: 'process-shutdown-error',
+				signal,
+				error,
+			});
+		} finally {
+			client.destroy();
+		}
+	})();
+
+	return shutdownPromise;
+}
+
+process.once('SIGINT', () => {
+	void shutdown('SIGINT');
+});
+
+process.once('SIGTERM', () => {
+	void shutdown('SIGTERM');
+});
 
 client.once(Events.ClientReady, (readyClient) => {
 	console.log(`Ready! Logged in as ${readyClient.user.tag}`);
@@ -72,8 +113,24 @@ client.on(Events.Raw, (packet) => {
 	void music.forwardRawData(packet);
 });
 
+client.on(Events.VoiceStateUpdate, (_oldState, newState) => {
+	const botUserId = client.user?.id;
+
+	if (botUserId) {
+		handleVoiceStateCleanup(newState, botUserId, music);
+	}
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
 	if (!interaction.isChatInputCommand()) {
+		return;
+	}
+
+	if (isShuttingDown) {
+		await interaction.reply({
+			content: 'The bot is shutting down. Try again after it restarts.',
+			flags: MessageFlags.Ephemeral,
+		});
 		return;
 	}
 

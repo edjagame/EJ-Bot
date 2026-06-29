@@ -18,9 +18,16 @@ export interface LavalinkConfig {
 	secure: boolean;
 }
 
+export interface MusicConfig {
+	emptyChannelGraceMs: number;
+}
+
 export interface RuntimeConfig extends DiscordConfig {
 	lavalink: LavalinkConfig;
+	music: MusicConfig;
 }
+
+const DEFAULT_EMPTY_CHANNEL_GRACE_MS = 30_000;
 
 function requireString(environment: Environment, name: string): string {
 	const value = environment[name]?.trim();
@@ -66,6 +73,30 @@ function requireBoolean(environment: Environment, name: string): boolean {
 	throw new Error(`${name} must be either true or false.`);
 }
 
+function optionalPositiveInteger(
+	environment: Environment,
+	name: string,
+	defaultValue: number,
+): number {
+	const value = environment[name]?.trim();
+
+	if (value === undefined || value === '') {
+		return defaultValue;
+	}
+
+	if (!/^\d+$/.test(value)) {
+		throw new Error(`${name} must be a positive integer.`);
+	}
+
+	const parsed = Number(value);
+
+	if (!Number.isSafeInteger(parsed) || parsed < 1) {
+		throw new Error(`${name} must be a positive integer.`);
+	}
+
+	return parsed;
+}
+
 export function loadDeployConfig(
 	environment: Environment = env,
 ): DiscordConfig {
@@ -88,6 +119,13 @@ export function loadRuntimeConfig(
 			port: requirePort(environment),
 			password: requireString(environment, 'LAVALINK_PASSWORD'),
 			secure: requireBoolean(environment, 'LAVALINK_SECURE'),
+		}),
+		music: Object.freeze({
+			emptyChannelGraceMs: optionalPositiveInteger(
+				environment,
+				'MUSIC_EMPTY_CHANNEL_GRACE_MS',
+				DEFAULT_EMPTY_CHANNEL_GRACE_MS,
+			),
 		}),
 	});
 }

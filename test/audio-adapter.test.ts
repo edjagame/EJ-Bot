@@ -59,3 +59,43 @@ test('maps unexpected search results to an error result', () => {
 		skippedCount: 0,
 	});
 });
+
+test('preserves the order of playable tracks returned by Lavalink', () => {
+	const result = {
+		loadType: 'playlist',
+		exception: null,
+		pluginInfo: { totalTracks: 3 },
+		playlist: { name: 'Ordered playlist' },
+		tracks: [
+			{
+				encoded: 'encoded-first',
+				info: {
+					title: 'First',
+					uri: 'https://www.youtube.com/watch?v=first',
+					duration: 10_000,
+				},
+			},
+			{
+				encoded: undefined,
+				info: {
+					title: 'Unavailable',
+					uri: 'https://www.youtube.com/watch?v=missing',
+					duration: 10_000,
+				},
+			},
+			{
+				encoded: 'encoded-third',
+				info: {
+					title: 'Third',
+					uri: 'https://www.youtube.com/watch?v=third',
+					duration: 30_000,
+				},
+			},
+		],
+	} as unknown as SearchResult;
+
+	assert.deepEqual(
+		mapLavalinkLoadResult(result).tracks.map((track) => track.title),
+		['First', 'Third'],
+	);
+});

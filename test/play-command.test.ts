@@ -13,6 +13,7 @@ import { MusicService } from '../src/music/music-service.js';
 
 class CommandAudioAdapter implements AudioAdapter {
 	isAvailable = true;
+	loadCount = 0;
 	loadResult: AudioLoadResult = {
 		loadType: 'track',
 		tracks: [
@@ -41,6 +42,7 @@ class CommandAudioAdapter implements AudioAdapter {
 		_url: string,
 		_requestedBy: string,
 	): Promise<AudioLoadResult> {
+		this.loadCount += 1;
 		return this.loadResult;
 	}
 
@@ -133,7 +135,8 @@ test('rejects /play outside a cached guild', async () => {
 });
 
 test('rejects invalid URLs and requesters outside voice', async () => {
-	const music = new MusicService(new CommandAudioAdapter());
+	const audio = new CommandAudioAdapter();
+	const music = new MusicService(audio);
 	const invalid = interaction({ url: 'plain text' });
 	const noVoice = interaction({ voiceChannelId: null });
 
@@ -146,6 +149,7 @@ test('rejects invalid URLs and requesters outside voice', async () => {
 	assert.deepEqual(noVoice.replies, [
 		'Join a voice channel before using /play.',
 	]);
+	assert.equal(audio.loadCount, 0);
 });
 
 test('enforces same-channel and bot permission checks', async () => {
@@ -181,5 +185,40 @@ test('defers a valid request and edits it with the playback result', async () =>
 	assert.deepEqual(target.replies, []);
 	assert.deepEqual(target.edits, [
 		'Now playing: [A \\[track\\]](https://www.youtube.com/watch?v=track)',
+	]);
+});
+
+test('maps unavailable videos and empty playlists to user-facing errors', async () => {
+	const videoAudio = new CommandAudioAdapter();
+	videoAudio.loadResult = {
+		loadType: 'empty',
+		tracks: [],
+		skippedCount: 0,
+	};
+	const unavailableVideo = interaction();
+
+	await playCommand.execute(unavailableVideo.value as never, {
+		music: new MusicService(videoAudio),
+	});
+
+	const playlistAudio = new CommandAudioAdapter();
+	playlistAudio.loadResult = {
+		loadType: 'empty',
+		tracks: [],
+		skippedCount: 0,
+	};
+	const emptyPlaylist = interaction({
+		url: 'https://www.youtube.com/playlist?list=empty-playlist',
+	});
+
+	await playCommand.execute(emptyPlaylist.value as never, {
+		music: new MusicService(playlistAudio),
+	});
+
+	assert.deepEqual(unavailableVideo.edits, [
+		'That video is unavailable or cannot be played.',
+	]);
+	assert.deepEqual(emptyPlaylist.edits, [
+		'That playlist has no playable videos.',
 	]);
 });

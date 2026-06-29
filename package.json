@@ -4,11 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "dev": "tsx src/index.ts",
-  "deploy": "tsx src/deploy-commands.ts",
-  "build": "tsc",
-  "test": "tsx --test test/*.test.ts",
-  "start": "node dist/index.js"
+    "dev": "tsx src/index.ts",
+    "deploy": "tsx src/deploy-commands.ts",
+    "typecheck": "tsc --project tsconfig.test.json",
+    "build": "tsc",
+    "test": "npm run test:unit",
+    "test:unit": "tsx --test test/*.test.ts",
+    "test:integration": "tsx --test test/integration/*.test.ts",
+    "start": "node dist/index.js"
   },
   "repository": {
     "type": "git",

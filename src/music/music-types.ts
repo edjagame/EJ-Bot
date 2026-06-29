@@ -27,3 +27,12 @@ export interface PlayResult {
 	readonly skippedCount: number;
 	readonly playlistName?: string;
 }
+
+export interface PlayRequest {
+	readonly guildId: string;
+	readonly voiceChannelId: string;
+	readonly textChannelId: string;
+	readonly url: string;
+	readonly urlKind: 'video' | 'playlist';
+	readonly requestedBy: string;
+}

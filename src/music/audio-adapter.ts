@@ -4,6 +4,8 @@ import {
 	type BotClientOptions,
 	type LavalinkNode,
 	type Player,
+	type SearchResult,
+	type UnresolvedSearchResult,
 	type VoicePacket,
 } from 'lavalink-client';
 import type { LavalinkConfig } from '../config.js';
@@ -20,10 +22,89 @@ export interface AudioClientIdentity {
 	readonly username?: string;
 }
 
+export interface AudioPlayerOptions {
+	readonly guildId: string;
+	readonly voiceChannelId: string;
+	readonly textChannelId: string;
+}
+
+export interface AudioTrack {
+	readonly encoded: string;
+	readonly title: string;
+	readonly url: string;
+	readonly durationMs: number;
+}
+
+export interface AudioLoadResult {
+	readonly loadType: 'track' | 'playlist' | 'empty' | 'error';
+	readonly tracks: readonly AudioTrack[];
+	readonly skippedCount: number;
+	readonly playlistName?: string;
+}
+
 export interface AudioAdapter {
 	readonly isAvailable: boolean;
 	initialize(client: AudioClientIdentity): Promise<boolean>;
 	forwardVoicePacket(data: unknown): Promise<void>;
+	createPlayer(options: AudioPlayerOptions): Promise<void>;
+	load(
+		guildId: string,
+		url: string,
+		requestedBy: string,
+	): Promise<AudioLoadResult>;
+	connect(guildId: string): Promise<void>;
+	play(guildId: string, encodedTrack: string): Promise<void>;
+	destroyPlayer(guildId: string): Promise<void>;
+}
+
+export function mapLavalinkLoadResult(
+	result: SearchResult | UnresolvedSearchResult,
+): AudioLoadResult {
+	const tracks = result.tracks.flatMap((track): AudioTrack[] => {
+		if (
+			typeof track.encoded !== 'string' ||
+			track.encoded.length === 0 ||
+			typeof track.info.title !== 'string' ||
+			track.info.title.length === 0 ||
+			typeof track.info.uri !== 'string' ||
+			track.info.uri.length === 0 ||
+			typeof track.info.duration !== 'number' ||
+			!Number.isFinite(track.info.duration) ||
+			track.info.duration < 0
+		) {
+			return [];
+		}
+
+		return [
+			{
+				encoded: track.encoded,
+				title: track.info.title,
+				url: track.info.uri,
+				durationMs: track.info.duration,
+			},
+		];
+	});
+	const reportedTotal =
+		typeof result.pluginInfo.totalTracks === 'number' &&
+		Number.isFinite(result.pluginInfo.totalTracks)
+			? Math.max(0, Math.trunc(result.pluginInfo.totalTracks))
+			: result.tracks.length;
+	const totalEntries = Math.max(reportedTotal, result.tracks.length);
+	const loadType =
+		result.loadType === 'track' ||
+		result.loadType === 'playlist' ||
+		result.loadType === 'empty'
+			? result.loadType
+			: 'error';
+
+	return {
+		loadType,
+		tracks,
+		skippedCount: Math.max(0, totalEntries - tracks.length),
+		...(result.playlist?.name
+			? { playlistName: result.playlist.name }
+			: {}),
+	};
 }
 
 function nodeContext(node: LavalinkNode): Record<string, unknown> {
@@ -103,6 +184,60 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 		}
 	}
 
+	async createPlayer(options: AudioPlayerOptions): Promise<void> {
+		if (this.#manager.getPlayer(options.guildId)) {
+			throw new Error(
+				`A Lavalink player already exists for guild ${options.guildId}.`,
+			);
+		}
+
+		this.#manager.createPlayer({
+			guildId: options.guildId,
+			voiceChannelId: options.voiceChannelId,
+			textChannelId: options.textChannelId,
+			selfDeaf: true,
+			selfMute: false,
+		});
+	}
+
+	async load(
+		guildId: string,
+		url: string,
+		requestedBy: string,
+	): Promise<AudioLoadResult> {
+		const player = this.#requirePlayer(guildId);
+		const result = await player.search(url, requestedBy, false);
+
+		if (result.loadType === 'error') {
+			console.warn('Lavalink rejected a track load request.', {
+				event: 'track-load-error',
+				guildId,
+				error: result.exception,
+			});
+		}
+
+		return mapLavalinkLoadResult(result);
+	}
+
+	async connect(guildId: string): Promise<void> {
+		await this.#requirePlayer(guildId).connect();
+	}
+
+	async play(guildId: string, encodedTrack: string): Promise<void> {
+		await this.#requirePlayer(guildId).play({
+			track: { encoded: encodedTrack },
+			noReplace: false,
+		});
+	}
+
+	async destroyPlayer(guildId: string): Promise<void> {
+		const player = this.#manager.getPlayer(guildId);
+
+		if (player) {
+			await player.destroy('music-service-cleanup', true);
+		}
+	}
+
 	async #initialize(client: AudioClientIdentity): Promise<boolean> {
 		const clientData: BotClientOptions = {
 			id: client.id,
@@ -147,6 +282,16 @@ export class LavalinkAudioAdapter implements AudioAdapter {
 			this.#manager.nodeManager.on('connect', onConnect);
 			this.#manager.nodeManager.on('destroy', onDestroy);
 		});
+	}
+
+	#requirePlayer(guildId: string): Player {
+		const player = this.#manager.getPlayer(guildId);
+
+		if (!player) {
+			throw new Error(`No Lavalink player exists for guild ${guildId}.`);
+		}
+
+		return player;
 	}
 
 	#registerLifecycleLogging(): void {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
 	AudioAdapter,
 	AudioClientIdentity,
@@ -6,6 +7,8 @@ import type {
 	GuildPlayer,
 	GuildQueue,
 	MusicTrack,
+	PlayRequest,
+	PlayResult,
 	PlayerState,
 } from './music-types.js';
 
@@ -22,8 +25,8 @@ interface MutableGuildPlayer {
 }
 
 export class AudioServiceUnavailableError extends Error {
-	constructor() {
-		super('No Lavalink node is currently connected.');
+	constructor(options?: ErrorOptions) {
+		super('No Lavalink node is currently connected.', options);
 		this.name = 'AudioServiceUnavailableError';
 	}
 }
@@ -46,6 +49,27 @@ export class DuplicateTrackIdError extends Error {
 	constructor(trackId: string) {
 		super(`Track ID ${trackId} already exists in the guild queue.`);
 		this.name = 'DuplicateTrackIdError';
+	}
+}
+
+export class VoiceChannelMismatchError extends Error {
+	constructor() {
+		super('The requester is not in the player voice channel.');
+		this.name = 'VoiceChannelMismatchError';
+	}
+}
+
+export class VideoUnavailableError extends Error {
+	constructor() {
+		super('The requested video did not contain a playable track.');
+		this.name = 'VideoUnavailableError';
+	}
+}
+
+export class PlaylistEmptyError extends Error {
+	constructor() {
+		super('The requested playlist did not contain any playable tracks.');
+		this.name = 'PlaylistEmptyError';
 	}
 }
 
@@ -117,6 +141,129 @@ export class MusicService {
 
 			this.#guilds.set(guildId, player);
 			return playerSnapshot(player);
+		});
+	}
+
+	play(request: PlayRequest): Promise<PlayResult> {
+		return this.#mutateGuild(request.guildId, async () => {
+			this.assertAvailable();
+
+			let player = this.#guilds.get(request.guildId);
+			let createdPlayer = false;
+
+			if (player && player.voiceChannelId !== request.voiceChannelId) {
+				throw new VoiceChannelMismatchError();
+			}
+
+			try {
+				if (!player) {
+					await this.#audio.createPlayer({
+						guildId: request.guildId,
+						voiceChannelId: request.voiceChannelId,
+						textChannelId: request.textChannelId,
+					});
+
+					player = {
+						guildId: request.guildId,
+						voiceChannelId: request.voiceChannelId,
+						state: 'idle',
+						queue: {
+							current: null,
+							upcoming: [],
+						},
+					};
+					this.#guilds.set(request.guildId, player);
+					createdPlayer = true;
+				}
+
+				const loaded = await this.#audio.load(
+					request.guildId,
+					request.url,
+					request.requestedBy,
+				);
+				const accepted = loaded.tracks.map((track) =>
+					freezeTrack({
+						id: randomUUID(),
+						encoded: track.encoded,
+						title: track.title,
+						url: track.url,
+						durationMs: track.durationMs,
+						requestedBy: request.requestedBy,
+					}),
+				);
+
+				if (
+					loaded.loadType === 'empty' ||
+					loaded.loadType === 'error' ||
+					accepted.length === 0
+				) {
+					if (request.urlKind === 'playlist') {
+						throw new PlaylistEmptyError();
+					}
+
+					throw new VideoUnavailableError();
+				}
+
+				if (createdPlayer) {
+					await this.#audio.connect(request.guildId);
+				}
+
+				const startsPlayback = player.queue.current === null;
+
+				if (startsPlayback) {
+					const playbackOrder = [...player.queue.upcoming, ...accepted];
+					const first = playbackOrder[0];
+
+					if (!first) {
+						throw new Error('No track was available to start.');
+					}
+
+					await this.#audio.play(request.guildId, first.encoded);
+					player.queue.current = first;
+					player.queue.upcoming = playbackOrder.slice(1);
+					player.state = 'playing';
+				} else {
+					player.queue.upcoming.push(...accepted);
+				}
+
+				return Object.freeze({
+					kind:
+						request.urlKind === 'playlist'
+							? 'playlist'
+							: startsPlayback
+								? 'started'
+								: 'queued',
+					accepted: Object.freeze([...accepted]),
+					skippedCount: loaded.skippedCount,
+					...(loaded.playlistName
+						? { playlistName: loaded.playlistName }
+						: {}),
+				});
+			} catch (error) {
+				if (createdPlayer) {
+					this.#guilds.delete(request.guildId);
+
+					try {
+						await this.#audio.destroyPlayer(request.guildId);
+					} catch (cleanupError) {
+						console.error('Failed to roll back a new music player.', {
+							event: 'play-rollback',
+							guildId: request.guildId,
+							error: cleanupError,
+						});
+					}
+				}
+
+				if (
+					error instanceof PlaylistEmptyError ||
+					error instanceof VideoUnavailableError ||
+					error instanceof VoiceChannelMismatchError
+				) {
+					throw error;
+				}
+
+				throw new AudioServiceUnavailableError({ cause: error });
+			}
 		});
 	}
 
@@ -252,4 +399,5 @@ export type {
 	MusicTrack,
 	PlayerState,
 	PlayResult,
+	PlayRequest,
 } from './music-types.js';

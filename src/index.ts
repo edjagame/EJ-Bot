@@ -77,6 +77,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				event: 'command-audio-unavailable',
 				command: interaction.commandName,
 				guildId: interaction.guildId,
+				error,
 			});
 		} else {
 			console.error('Unexpected command failure.', {
@@ -94,7 +95,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			flags: MessageFlags.Ephemeral,
 		};
 
-		if (interaction.replied || interaction.deferred) {
+		if (interaction.deferred && !interaction.replied) {
+			await interaction.editReply({ content: response.content });
+		} else if (interaction.replied) {
 			await interaction.followUp(response);
 		} else {
 			await interaction.reply(response);

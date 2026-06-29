@@ -59,6 +59,8 @@ services:
     depends_on:
       lavalink-plugins-init:
         condition: service_completed_successfully
+    env_file:
+      - .env
     environment:
       LAVALINK_PASSWORD: "${LAVALINK_PASSWORD:?Set LAVALINK_PASSWORD in the project .env file}"
       YOUTUBE_OAUTH_ENABLED: "${YOUTUBE_OAUTH_ENABLED:-false}"

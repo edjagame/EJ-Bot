@@ -71,6 +71,7 @@ Use the generated value as `LAVALINK_PASSWORD`, then set:
 
 ```dotenv
 DISCORD_TOKEN=replace_with_the_discord_bot_token
+MUSIC_ENABLED=false
 LAVALINK_PASSWORD=replace_with_the_generated_password
 MUSIC_EMPTY_CHANNEL_GRACE_MS=30000
 YOUTUBE_OAUTH_ENABLED=false
@@ -80,8 +81,10 @@ YOUTUBE_OAUTH_SKIP_INITIALIZATION=false
 
 The Compose stack supplies `LAVALINK_HOST`, `LAVALINK_PORT`, and
 `LAVALINK_SECURE`; values for those keys in `.env` are overridden inside the
-bot container. Keep `.env` out of Git and rotate both credentials if it is
-ever exposed.
+bot container. Music is temporarily disabled by default; set
+`MUSIC_ENABLED=true` only when the music feature should be exposed. The
+Compose stack still runs Lavalink in either mode. Keep `.env` out of Git and
+rotate both credentials if it is ever exposed.
 
 Before starting the bot, enable **Message Content Intent** on the
 application's Bot page in the Discord Developer Portal. The bot cannot read

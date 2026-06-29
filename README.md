@@ -1,9 +1,9 @@
 # EJ Bot
 
-EJ Bot is a TypeScript Discord bot built with `discord.js`. Its music
-commands play YouTube video and playlist URLs through a separately operated
-Lavalink v4 node. Commands use the `e!` prefix; run `e!help` for the complete
-command list.
+EJ Bot is a TypeScript Discord bot built with `discord.js`. Commands use the
+`e!` prefix; run `e!help` for the complete command list. Music commands can
+play YouTube video and playlist URLs through a separately operated Lavalink
+v4 node, but they are temporarily disabled by default.
 
 Operators are responsible for complying with YouTube's terms and for ensuring
 that they have the right to play requested content.
@@ -26,6 +26,7 @@ Copy `.env.example` to `.env` and replace every runtime placeholder:
 
 ```dotenv
 DISCORD_TOKEN=bot_token
+MUSIC_ENABLED=false
 LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
 LAVALINK_PASSWORD=replace_with_a_strong_unique_password
@@ -33,10 +34,12 @@ LAVALINK_SECURE=false
 MUSIC_EMPTY_CHANNEL_GRACE_MS=30000
 ```
 
-The bot validates configuration at startup. `LAVALINK_PORT` must be an
-integer from `1` through `65535`, `LAVALINK_SECURE` must be exactly `true` or
-`false`, and the empty-channel grace period must be a positive integer in
-milliseconds.
+`MUSIC_ENABLED` defaults to `false`. In that mode the bot does not initialize
+Lavalink and ignores the Lavalink and empty-channel settings. Set it to
+`true` to enable music. The bot then requires the Lavalink settings,
+validates `LAVALINK_PORT` as an integer from `1` through `65535`, requires
+`LAVALINK_SECURE` to be exactly `true` or `false`, and requires the
+empty-channel grace period to be a positive integer in milliseconds.
 
 In the Discord Developer Portal, open the application's **Bot** settings and
 enable the privileged **Message Content Intent**. Prefix commands cannot be
@@ -57,7 +60,12 @@ proof-of-origin tokens are disabled by default. The `TV` client is configured
 as the final playback fallback so operators can opt in to OAuth without
 changing the tracked Lavalink configuration.
 
-Start and verify Lavalink before starting the Discord bot:
+With `MUSIC_ENABLED=false`, start the bot directly using the commands below;
+no Lavalink process or configuration is required. The help command marks all
+music commands as temporarily disabled.
+
+When enabling music, start and verify Lavalink before starting the Discord
+bot:
 
 ```sh
 docker compose --env-file .env -f lavalink/compose.yml config --quiet
@@ -92,9 +100,10 @@ npm run build
 npm start
 ```
 
-A Lavalink outage does not stop utility commands. The bot bounds connection
-and load attempts, logs the failure without configured credentials, and tells
-music-command users that the audio service is unavailable.
+When music is enabled, a Lavalink outage does not stop utility commands. The
+bot bounds connection and load attempts, logs the failure without configured
+credentials, and tells music-command users that the audio service is
+unavailable.
 
 ## Tests and continuous integration
 

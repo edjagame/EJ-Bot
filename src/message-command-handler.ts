@@ -1,6 +1,7 @@
 import type { Message } from 'discord.js';
 import {
 	COMMAND_PREFIX,
+	isCommandEnabled,
 	type CommandContext,
 } from './command.js';
 import { AudioServiceUnavailableError } from './music/music-service.js';
@@ -37,6 +38,11 @@ export async function handleMessageCommand(
 			message,
 			`Unknown command \`${commandName}\`. Use \`${COMMAND_PREFIX}help\` to see available commands.`,
 		);
+		return;
+	}
+
+	if (!isCommandEnabled(command, context)) {
+		await reply(message, 'Music commands are temporarily disabled.');
 		return;
 	}
 

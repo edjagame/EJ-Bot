@@ -17,13 +17,21 @@ export interface LavalinkConfig {
 }
 
 export interface MusicConfig {
+	enabled: true;
 	emptyChannelGraceMs: number;
 }
 
-export interface RuntimeConfig extends DiscordConfig {
+export interface DisabledMusicConfig {
+	enabled: false;
+}
+
+export type RuntimeConfig = DiscordConfig & {
 	lavalink: LavalinkConfig;
 	music: MusicConfig;
-}
+} | DiscordConfig & {
+	lavalink: null;
+	music: DisabledMusicConfig;
+};
 
 const DEFAULT_EMPTY_CHANNEL_GRACE_MS = 30_000;
 
@@ -71,6 +79,18 @@ function requireBoolean(environment: Environment, name: string): boolean {
 	throw new Error(`${name} must be either true or false.`);
 }
 
+function optionalBoolean(
+	environment: Environment,
+	name: string,
+	defaultValue: boolean,
+): boolean {
+	if (environment[name] === undefined) {
+		return defaultValue;
+	}
+
+	return requireBoolean(environment, name);
+}
+
 function optionalPositiveInteger(
 	environment: Environment,
 	name: string,
@@ -105,6 +125,21 @@ export function loadRuntimeConfig(
 	environment: Environment = env,
 ): RuntimeConfig {
 	const discord = loadDiscordConfig(environment);
+	const musicEnabled = optionalBoolean(
+		environment,
+		'MUSIC_ENABLED',
+		false,
+	);
+
+	if (!musicEnabled) {
+		return Object.freeze({
+			...discord,
+			lavalink: null,
+			music: Object.freeze({
+				enabled: false,
+			}),
+		});
+	}
 
 	return Object.freeze({
 		...discord,
@@ -115,6 +150,7 @@ export function loadRuntimeConfig(
 			secure: requireBoolean(environment, 'LAVALINK_SECURE'),
 		}),
 		music: Object.freeze({
+			enabled: true,
 			emptyChannelGraceMs: optionalPositiveInteger(
 				environment,
 				'MUSIC_EMPTY_CHANNEL_GRACE_MS',

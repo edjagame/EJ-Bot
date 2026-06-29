@@ -26,10 +26,14 @@ function fakeMessage(content: string, bot = false) {
 	};
 }
 
-function context(commands: ReadonlyMap<string, Command>): CommandContext {
+function context(
+	commands: ReadonlyMap<string, Command>,
+	musicEnabled = true,
+): CommandContext {
 	return {
-		music: {} as never,
+		music: musicEnabled ? ({} as never) : null,
 		commands,
+		enabledFeatures: new Set(musicEnabled ? ['music'] as const : []),
 	};
 }
 
@@ -114,10 +118,52 @@ test('rejects commands while shutting down', async () => {
 	]);
 });
 
-test('maps unavailable audio services to a user-facing response', async () => {
-	const command = testCommand('play', async () => {
-		throw new AudioServiceUnavailableError();
+test('rejects disabled music commands before execution', async () => {
+	let executions = 0;
+	const command: Command = {
+		...testCommand('play', async () => {
+			executions += 1;
+		}),
+		feature: 'music',
+	};
+	const commands = new Map([['play', command]]);
+	const target = fakeMessage('e!play url');
+
+	await handleMessageCommand(
+		target.value as never,
+		context(commands, false),
+	);
+
+	assert.equal(executions, 0);
+	assert.deepEqual(target.replies, [
+		'Music commands are temporarily disabled.',
+	]);
+});
+
+test('keeps utility commands available while music is disabled', async () => {
+	let executions = 0;
+	const command = testCommand('ping', async () => {
+		executions += 1;
 	});
+	const commands = new Map([['ping', command]]);
+	const target = fakeMessage('e!ping');
+
+	await handleMessageCommand(
+		target.value as never,
+		context(commands, false),
+	);
+
+	assert.equal(executions, 1);
+	assert.deepEqual(target.replies, []);
+});
+
+test('maps unavailable audio services to a user-facing response', async () => {
+	const command: Command = {
+		...testCommand('play', async () => {
+			throw new AudioServiceUnavailableError();
+		}),
+		feature: 'music',
+	};
 	const commands = new Map([['play', command]]);
 	const target = fakeMessage('e!play url');
 	const originalWarn = console.warn;
@@ -140,6 +186,7 @@ test('help lists commands and shows details for a selected command', async () =>
 		description: 'Plays a YouTube URL.',
 		usage: 'play <YouTube URL>',
 		guildOnly: true,
+		feature: 'music',
 	};
 	const commands = new Map<string, Command>([
 		['play', play],
@@ -147,6 +194,8 @@ test('help lists commands and shows details for a selected command', async () =>
 	]);
 	const listing = fakeMessage('e!help');
 	const details = fakeMessage('e!help play');
+	const disabledListing = fakeMessage('e!help');
+	const disabledDetails = fakeMessage('e!help play');
 
 	await helpCommand.execute(
 		listing.value as never,
@@ -158,11 +207,28 @@ test('help lists commands and shows details for a selected command', async () =>
 		['play'],
 		context(commands),
 	);
+	await helpCommand.execute(
+		disabledListing.value as never,
+		[],
+		context(commands, false),
+	);
+	await helpCommand.execute(
+		disabledDetails.value as never,
+		['play'],
+		context(commands, false),
+	);
 
 	assert.match(listing.replies[0]!, /\*\*Available commands\*\*/);
 	assert.match(listing.replies[0]!, /`e!help \[command\]`/);
 	assert.match(listing.replies[0]!, /`e!play <YouTube URL>`/);
 	assert.deepEqual(details.replies, [
 		'**e!play <YouTube URL>**\nPlays a YouTube URL.\nServer only.',
+	]);
+	assert.match(
+		disabledListing.replies[0]!,
+		/`e!play <YouTube URL>`.*\(temporarily disabled\)/,
+	);
+	assert.deepEqual(disabledDetails.replies, [
+		'**e!play <YouTube URL>**\nPlays a YouTube URL.\nServer only.\nTemporarily disabled.',
 	]);
 });

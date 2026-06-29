@@ -1,4 +1,7 @@
-import type { Command } from '../../command.js';
+import {
+	requireMusicService,
+	type Command,
+} from '../../command.js';
 import {
 	controlErrorMessage,
 	replyToMessage,
@@ -10,7 +13,9 @@ const command: Command = {
 	description: 'Resumes the paused track.',
 	usage: 'resume',
 	guildOnly: true,
-	async execute(message, _args, { music }): Promise<void> {
+	feature: 'music',
+	async execute(message, _args, commandContext): Promise<void> {
+		const music = requireMusicService(commandContext.music);
 		const context = await requireControlContext(message, music);
 
 		if (!context) {

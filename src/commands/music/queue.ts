@@ -1,4 +1,7 @@
-import type { Command } from '../../command.js';
+import {
+	requireMusicService,
+	type Command,
+} from '../../command.js';
 import { replyToMessage } from '../../music/music-command-helpers.js';
 import { trackLink } from '../../music/music-format.js';
 import type {
@@ -71,7 +74,10 @@ const command: Command = {
 	description: 'Shows the current music queue.',
 	usage: 'queue',
 	guildOnly: true,
-	async execute(message, _args, { music }): Promise<void> {
+	feature: 'music',
+	async execute(message, _args, context): Promise<void> {
+		const music = requireMusicService(context.music);
+
 		if (!message.inGuild()) {
 			await replyToMessage(
 				message,

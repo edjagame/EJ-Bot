@@ -3,6 +3,7 @@ import {
 } from 'discord.js';
 import {
 	COMMAND_PREFIX,
+	requireMusicService,
 	type Command,
 } from '../../command.js';
 import {
@@ -60,7 +61,10 @@ const command: Command = {
 	description: 'Plays a YouTube video or playlist URL.',
 	usage: 'play <YouTube URL>',
 	guildOnly: true,
-	async execute(message, args, { music }): Promise<void> {
+	feature: 'music',
+	async execute(message, args, context): Promise<void> {
+		const music = requireMusicService(context.music);
+
 		if (!message.inGuild()) {
 			await message.reply({
 				content: 'This command can only be used in a server.',

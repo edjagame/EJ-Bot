@@ -123,7 +123,11 @@ function message(options: MessageOptions = {}) {
 }
 
 function commandContext(music: MusicService) {
-	return { music, commands: new Map() };
+	return {
+		music,
+		commands: new Map(),
+		enabledFeatures: new Set(['music'] as const),
+	};
 }
 
 async function playingService(

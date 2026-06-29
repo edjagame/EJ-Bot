@@ -1,8 +1,10 @@
 # Manual Discord Acceptance Checklist
 
-Use this checklist in the configured test guild after all automated checks and
-the live Lavalink integration suite pass. A human must confirm voice-channel
-audio; starting the bot successfully is not evidence that audio played.
+Use the disabled-mode checklist for the default deployment. Run the enabled
+music scenarios only when `MUSIC_ENABLED=true`, after all automated checks
+and the live Lavalink integration suite pass. A human must confirm
+voice-channel audio; starting the bot successfully is not evidence that audio
+played.
 
 ## Sign-off
 
@@ -19,11 +21,19 @@ audio; starting the bot successfully is not evidence that audio played.
 Record `PASS` or `FAIL` and concise evidence for every scenario. Do not place
 tokens, passwords, or complete environment files in the evidence column.
 
-## Scenarios
+## Disabled-mode scenarios
 
 | # | Scenario and actions | Expected result | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| 1 | Run `e!help`, then run `e!help play`. | Help lists every command with usage and descriptions; command-specific help shows `e!play <YouTube URL>` and marks it server-only. | | |
+| 1 | Start the bot with `MUSIC_ENABLED=false`, then run `e!help` and `e!help play`. | The bot starts without Lavalink configuration. Help lists all six music commands as temporarily disabled, and command-specific help includes `Temporarily disabled.` | | |
+| 2 | Run each of `e!play`, `e!pause`, `e!resume`, `e!skip`, `e!queue`, and `e!disconnect`. | Every command replies `Music commands are temporarily disabled.` and the bot does not connect to voice. | | |
+| 3 | Run each non-music command shown by `e!help`. | Utility commands continue to execute normally. | | |
+
+## Enabled music scenarios
+
+| # | Scenario and actions | Expected result | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 1 | Start the bot with `MUSIC_ENABLED=true`, run `e!help`, then run `e!help play`. | Help lists every command with usage and descriptions without disabled markers; command-specific help shows `e!play <YouTube URL>` and marks it server-only. | | |
 | 2 | Join a voice channel and run `e!play` with a public video URL. | The bot joins the requester's channel, replies with the playing track, and audible playback begins. | | |
 | 3 | While the first track plays, queue another video and then a playlist. Wait for advancement. | `e!queue` preserves request order; each track starts exactly once and playback advances automatically. | | |
 | 4 | Pause, resume, skip, inspect `e!queue`, and disconnect. | Pause stops audible playback, resume continues it, skip advances once, queue output matches state, and disconnect clears the queue and leaves voice. | | |

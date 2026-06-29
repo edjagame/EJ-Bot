@@ -1,81 +1,50 @@
-# EJ-Bot
+# EJ Bot
 
-EJ-Bot is a Discord bot designed to enhance your server experience with various features and commands.
+EJ Bot is a TypeScript Discord bot built with `discord.js`.
 
-## Features
+## Setup
 
-- 🎵 Music playback from various sources
-- 🤖 Chat functionality powered by GPT
-- 📚 Dictionary word definitions
-- ➕ More features in development
+Install dependencies:
 
-## Installation
+```sh
+npm install
+```
 
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/EJ-Bot.git
-    ```
+Copy `.env.example` to `.env` and configure:
 
-2. Create and activate a virtual environment:
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
+```dotenv
+DISCORD_TOKEN=bot_token
+CLIENT_ID=application_id
+TEST_SERVER_ID=test_server_id
+```
 
-3. Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
+Start the bot in development:
 
-4. Create a `.env` file in the root directory:
-    ```
-    DISCORD_TOKEN=your_discord_token
-    GEMINI_TOKEN=your_gemini_token
-    ```
+```sh
+npm run dev
+```
 
-5. Replace the tokens in `.env` with your actual Discord and Gemini API tokens.
+Build and start the compiled bot:
 
-## Lavalink Configuration
+```sh
+npm run build
+npm start
+```
 
-1. Download and set up Lavalink:
-    ```bash
-    curl -O https://github.com/freyacodes/Lavalink/releases/download/<VERSION>/Lavalink.jar
-    ```
-    Replace `<VERSION>` with the latest version
+## Deploy slash commands
 
-2. Create `application.yml` in the same directory:
-    ```yaml
-    server:
-      port: 2333
-      address: 127.0.0.1
-    lavalink:
-      server:
-         password: "youshallnotpass"
-         sources:
-            youtube: true
-            bandcamp: true
-            soundcloud: true
-            twitch: true
-            vimeo: true
-         bufferDurationMs: 400
-         frameBufferDurationMs: 1000
-    ```
+Deploy all valid command modules to the configured test guild:
 
-## Usage
+```sh
+npm run deploy
+```
 
-1. Invite the bot to your server using the following link:
-    ```
-    https://discord.com/oauth2/authorize?client_id=your-client-id&permissions=603604003444800&integration_type=0&scope=bot
-    ```
-    Replace `your-client-id` with your bot's client ID.
+Guild deployment is intentionally the default because command changes become
+available quickly during development. The command reports how many commands
+Discord registered.
 
-2. Start the Lavalink server:
-    ```bash
-    java -jar Lavalink.jar
-    ```
-
-3. Run `Main.py`
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
+Production promotion must be deliberate. After validating commands in the test
+guild, use a separately reviewed deployment that calls
+`Routes.applicationCommands(CLIENT_ID)`. Do not change the default deployment
+script to register commands globally; global command updates can take longer to
+propagate and affect every guild that has installed the application.

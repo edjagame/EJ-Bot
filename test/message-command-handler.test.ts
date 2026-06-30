@@ -224,11 +224,12 @@ test('help lists commands and shows details for a selected command', async () =>
 	assert.deepEqual(details.replies, [
 		'**e!play <YouTube URL>**\nPlays a YouTube URL.\nServer only.',
 	]);
-	assert.match(
+	assert.doesNotMatch(
 		disabledListing.replies[0]!,
-		/`e!play <YouTube URL>`.*\(temporarily disabled\)/,
+		/`e!play <YouTube URL>`/,
 	);
+	assert.match(disabledListing.replies[0]!, /`e!help \[command\]`/);
 	assert.deepEqual(disabledDetails.replies, [
-		'**e!play <YouTube URL>**\nPlays a YouTube URL.\nServer only.\nTemporarily disabled.',
+		'Unknown command `play`. Use `e!help` to see available commands.',
 	]);
 });

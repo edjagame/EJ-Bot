@@ -19,7 +19,7 @@ const command: Command = {
 		if (requestedName) {
 			const requested = commands.get(requestedName);
 
-			if (!requested) {
+			if (!requested || !isCommandEnabled(requested, context)) {
 				await message.reply({
 					content: `Unknown command \`${requestedName}\`. Use \`${COMMAND_PREFIX}help\` to see available commands.`,
 					allowedMentions: { repliedUser: false },
@@ -28,25 +28,20 @@ const command: Command = {
 			}
 
 			const scope = requested.guildOnly ? '\nServer only.' : '';
-			const availability = isCommandEnabled(requested, context)
-				? ''
-				: '\nTemporarily disabled.';
 			await message.reply({
-				content: `**${commandUsage(requested)}**\n${requested.description}${scope}${availability}`,
+				content: `**${commandUsage(requested)}**\n${requested.description}${scope}`,
 				allowedMentions: { repliedUser: false },
 			});
 			return;
 		}
 
 		const commandLines = [...commands.values()]
+			.filter((available) => isCommandEnabled(available, context))
 			.sort((left, right) => left.name.localeCompare(right.name))
-			.map((available) => {
-				const availability = isCommandEnabled(available, context)
-					? ''
-					: ' (temporarily disabled)';
-
-				return `\`${commandUsage(available)}\` — ${available.description}${availability}`;
-			});
+			.map(
+				(available) =>
+					`\`${commandUsage(available)}\` — ${available.description}`,
+			);
 
 		await message.reply({
 			content: [

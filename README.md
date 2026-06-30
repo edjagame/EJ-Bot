@@ -61,8 +61,8 @@ as the final playback fallback so operators can opt in to OAuth without
 changing the tracked Lavalink configuration.
 
 With `MUSIC_ENABLED=false`, start the bot directly using the commands below;
-no Lavalink process or configuration is required. The help command marks all
-music commands as temporarily disabled.
+no Lavalink process or configuration is required. The help command hides all
+music commands.
 
 When enabling music, start and verify Lavalink before starting the Discord
 bot:

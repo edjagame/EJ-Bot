@@ -25,7 +25,7 @@ tokens, passwords, or complete environment files in the evidence column.
 
 | # | Scenario and actions | Expected result | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| 1 | Start the bot with `MUSIC_ENABLED=false`, then run `e!help` and `e!help play`. | The bot starts without Lavalink configuration. Help lists all six music commands as temporarily disabled, and command-specific help includes `Temporarily disabled.` | | |
+| 1 | Start the bot with `MUSIC_ENABLED=false`, then run `e!help` and `e!help play`. | The bot starts without Lavalink configuration. Help omits all six music commands, and command-specific help reports `play` as unknown. | | |
 | 2 | Run each of `e!play`, `e!pause`, `e!resume`, `e!skip`, `e!queue`, and `e!disconnect`. | Every command replies `Music commands are temporarily disabled.` and the bot does not connect to voice. | | |
 | 3 | Run each non-music command shown by `e!help`. | Utility commands continue to execute normally. | | |
 
